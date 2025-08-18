@@ -24,7 +24,7 @@ pip install deferential_expression
 - **R** (≥ 4.x) with:
   - `recount3`, `edgeR`, `limma`
 - **Python** (3.10+):
-  - `rpy2`, `pandas`, `numpy`, `biocframe`, `summarizedexperiment`
+  - `rpy2`, `pandas`, `numpy`, `biocframe`, `summarizedexperiment`, `pyrtools`
   - this package: `deferential_expression`
 
 Install R pkgs once:
