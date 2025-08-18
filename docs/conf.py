@@ -322,3 +322,21 @@ autosummary_generate = True
 autosummary_imported_members = True
 
 html_theme = "furo"
+
+# Build docs without needing R/rpy2 or heavy deps:
+autodoc_mock_imports = [
+    "rpy2",
+    "rpy2.robjects",
+    "rpy2.rinterface",
+    "biocframe",
+    "summarizedexperiment",
+    "pyrtools",
+    "pyrtools.lazy_r_env",
+]
+
+nb_execution_mode = "off"
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
+napoleon_use_param = True
+napoleon_use_rtype = False

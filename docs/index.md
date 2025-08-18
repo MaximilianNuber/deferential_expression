@@ -37,3 +37,4 @@ Module Reference <api/modules>
 [Markdown]: https://daringfireball.net/projects/markdown/
 [reStructuredText]: http://www.sphinx-doc.org/en/master/usage/restructuredtext/basics.html
 [MyST]: https://myst-parser.readthedocs.io/en/latest/
+
