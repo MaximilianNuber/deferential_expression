@@ -7,8 +7,6 @@
 R matrices stay R-backed with `RMatrixAdapter`, so slicing (`se[mask, :]`) happens in R and you can pass assays straight to edgeR/limma.
 
 
-A longer description of your project goes here...
-
 ## Install
 
 To get started, install the package from [PyPI](https://pypi.org/project/deferential_expression/)
