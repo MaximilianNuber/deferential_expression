@@ -149,15 +149,15 @@ volcano(tt, title="edgeR QLF", outpath="figures/volcano_edger.png")
 ## Limma voom variant
 ```
 # voom: log-CPM + weights (writes assays 'log_expr' and 'weights')
-se2 = de.limma.limma_voom_default(edg, design=design, log_expr_assay="log_expr", weights_assay="weights")
+se2 = de.limma.voom(edg, design=design, log_expr_assay="log_expr", weights_assay="weights")
 
 # optional between-array normalization
-se2 = de.limma.limma_normalize_between_arrays_default(se2, exprs_assay="log_expr", normalized_assay="log_expr_norm")
+se2 = de.limma.normalize_between_arrays(se2, exprs_assay="log_expr", normalized_assay="log_expr_norm")
 
 # lmFit → contrasts → eBayes → topTable
-se2 = de.limma.limma_lm_fit_default(se2, design=design)
-se2 = de.limma.limma_contrasts_fit(se2, contrast=[0, 1])  # example only
-tt_limma = de.limma.limma_top_table(se2, n=20)
+se2 = de.limma.lm_fit(se2, design=design)
+se2 = de.limma.contrasts_fit(se2, contrast=[0, 1])  # example only
+tt_limma = de.limma.top_table(se2, n=20)
 ```
 ![edgeR volcano](figures/volcano_limma.png)
 
