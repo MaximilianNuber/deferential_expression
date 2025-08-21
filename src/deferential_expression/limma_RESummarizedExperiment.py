@@ -7,21 +7,18 @@ import numpy as np
 import numpy as np
 import pandas as pd
 from typing import Any, Dict, Optional, Sequence, Union, Tuple
+from dataclasses import dataclass
+from dataclasses import replace
 
 # rpy2 manager and converters
-from deferential_expression.rpy2_manager import Rpy2Manager
-_rmana = Rpy2Manager()
+from pyrtools.lazy_r_env import get_r_environment, r
+from pyrtools.r_converters import RConverters
+_rmana = get_r_environment()
 
-# SummarizedExperiment base
-from summarizedexperiment import SummarizedExperiment
 
 # Your adapter & converters (assumes you defined these elsewhere in the package)
-from deferential_expression.edger_RESummarizedExperiment import RMatrixAdapter
-from deferential_expression.edger_RESummarizedExperiment import RESummarizedExperiment      # wraps an R matrix with .shape, .rmat, to_numpy()
-from deferential_expression.edger_RESummarizedExperiment import (
-    _df_to_r_matrix,   # pandas.DataFrame → R matrix
-    _df_to_r_df,       # pandas.DataFrame → R data.frame
-)
+# from deferential_expression.edger_RESummarizedExperiment import RMatrixAdapter
+from .resummarizedexperiment import RESummarizedExperiment, RMatrixAdapter, _df_to_r_matrix, _df_to_r_df
 
 # Helper to lazy-load limma
 _limma_pkg: Any = None
@@ -203,7 +200,7 @@ def voom(
         if "norm.factors" in se.column_data.column_names:
             # use norm factors as lib_size if available
             lib_size = se.column_data["norm.factors"]
-            lib_size = np.asarray
+            lib_size = np.asarray(lib_size, dtype=float)
             
             lib_size = r.FloatVector(lib_size)
         else:
@@ -212,7 +209,7 @@ def voom(
 
     if block is not None:
         if isinstance(block, pd.Categorical):
-            with r.localconverter(r.default_converter + r.pandas2ri_converter):
+            with r.localconverter(r.default_converter + r.pandas2ri.converter):
                 block = r.get_conversion().py2rpy(block)
         else:
             block = np.asarray(block, dtype=str)
@@ -373,11 +370,71 @@ def remove_batch_effect(
     )
 
 # ——— 5) lmFit.default — store coefficients etc. in metadata ———
+
+@dataclass
+class LimmaResults:
+    """Container for limma results including fit, coefficients, and metadata."""
+    sample_names: Optional[Sequence[str]] = None  # Sample names (column names)
+    feature_names: Optional[Sequence[str]] = None  # Feature names (row names)
+    lm_fit: Optional[Any] = None  # R object from lmFit
+    contrast_fit: Optional[Any] = None  # R object from contrasts.fit
+    ebayes: Optional[Any] = None  # R object from eBayes    
+
+    design: Optional[pd.DataFrame] = None  # Design matrix used for fitting
+    ndups: Optional[int] = None  # Number of technical replicates (if applicable
+    method: Literal["ls", "robust"] = "ls"  # Fitting method used
+
+    coefficients: Optional[pd.DataFrame] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+    def get_sample_names(self) -> Sequence[str]:
+        """Get sample names from the design matrix or fit object."""
+        if self.sample_names is not None:
+            return self.sample_names
+
+        if self.lm_fit is not None:
+            r = get_r_environment()
+            return list(r.ro.baseenv["colnames"](r.ro.baseenv["(self.lm_fit)))
+        return ()
+    def get_feature_names(self) -> Sequence[str]:
+        """Get feature names from the design matrix or fit object."""
+        if self.feature_names is not None:
+            return self.feature_names
+
+        if self.lm_fit is not None:
+            r = get_r_environment()
+            return list(r.ro.baseenv["rownames"](self.lm_fit))
+        return ()
+    def get_lmfit_names(self) -> Sequence[str]:
+        r = get_r_environment()
+        return list(r.ro.baseenv["names"](self.lm_fit))
+    def get_coefficients(self) -> pd.DataFrame:
+        """Extract coefficients as a pandas DataFrame from the limma lm_fit object."""
+        assert self.lm_fit is not None, "lm_fit must be set to extract coefficients"
+        _r = get_r_environment()
+        if self.lm_fit is not None:
+            coefs_r = self.lm_fit.rx2("coefficients")
+            
+        return RConverters.rmatrix_to_pandas(coefs_r)
+    
+    def e_bayes(self) -> LimmaResults:
+        """Run eBayes on the lm_fit object and store the result."""
+        assert self.lm_fit is not None, "lm_fit must be set to run eBayes"
+        _r = get_r_environment()
+        limma_pkg = _limma()
+        eb = limma_pkg.eBayes(self.lm_fit)
+        return replace(
+            self,
+            ebayes = eb
+        )
+
+
 def lm_fit(
     se: RESummarizedExperiment,
     design: pd.DataFrame,
     ndups: int | None = None,
     method: Literal["ls", "robust"] = "ls",  # or "robust" etc.
+    return_result_object: bool = False,
     **kwargs
 ) -> RESummarizedExperiment:
     """Run `limma::lmFit` on an expression assay and store the fit on the object.
@@ -402,8 +459,13 @@ def lm_fit(
     
     _r = _rmana
     limma_pkg = _limma()
+
+    lmres = LimmaResults(method=method, sample_names=se.column_names, feature_names=se.row_names)
+
     exprs_r = se.assay_r("log_expr")  # or whichever assay
     design_r = _df_to_r_matrix(design)
+    lmres.design = design
+
     if "weights" in se.assay_names:
         weights = se.assay_r("weights")
     else:
@@ -415,6 +477,13 @@ def lm_fit(
         assert isinstance(ndups, int), "ndups must be an integer or None"
 
     fit = limma_pkg.lmFit(exprs_r, design_r, weights = weights, method = method, **kwargs)
+    lmres.lm_fit = fit
+
+    if return_result_object:
+        # return the LimmaResults object directly
+        # lmres.coefficients = pd.DataFrame(fit.rx2("coefficients"))
+        # lmres.metadata = dict(se.metadata)
+        return lmres
 
     if isinstance(se, Limma):
         return se._clone(
@@ -487,6 +556,7 @@ def contrasts_fit(
 
 def top_table(
     se: Limma,
+    coef: str|int|None = None,
     n: int | None = None,
     adjust_method: str = "BH",
     sort_by: str = "PValue",
@@ -496,6 +566,8 @@ def top_table(
 
     Args:
         se: A `Limma` instance with either `contrast_fit` or `lm_fit` set.
+        coef: Either the name of the coefficient in the design matrix, or its index. 
+            Indexing starts at 1 (1-based indexing), due to R's conventions.
         n: Number of top rows to return. If `None`, defaults to the number of rows
             in the object (i.e., all features).
         adjust_method: Multiple testing method (e.g., `"BH"`).
@@ -527,11 +599,15 @@ def top_table(
     if n is None:
         n = se.shape[0]   
     
+    if coef is None:
+        # default to the first coefficient (1-based index)
+        coef = _r.ro.NULL
+    
     # call topTable.default
-    top_r = limma_pkg.topTable(eb, n=n, adjust_method=adjust_method, sort_by="none", **kwargs)
+    top_r = limma_pkg.topTable(eb,coef = coef, n=n, adjust_method=adjust_method, sort_by="none", **kwargs)
     
     # convert to pandas DataFrame
-    with _r.localconverter(_r.default_converter + _r.pandas2ri_converter):
+    with _r.localconverter(_r.default_converter + _r.pandas2ri.converter):
         df = _r.get_conversion().rpy2py(top_r)
     
     return df.reset_index(names="gene").rename(columns={'P.Value':'p_value', 'logFC':'log_fc', 'adj.P.Val':'adj_p_value'})
