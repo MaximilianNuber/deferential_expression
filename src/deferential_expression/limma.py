@@ -372,8 +372,26 @@ def remove_batch_effect(
 # ——— 5) lmFit.default — store coefficients etc. in metadata ———
 
 @dataclass
-class LimmaResults:
-    """Container for limma results including fit, coefficients, and metadata."""
+class LimmaModel:
+    """Container for limma results including fit, coefficients, and metadata.
+
+    This class encapsulates the results of fitting a linear model using limma,
+    storing the R objects produced by `lmFit`, `contrasts.fit`, and `eBayes`.
+    It also holds sample and feature names, the design matrix, fitting method,
+    and extracted coefficients as a pandas DataFrame.
+
+    Args:
+        sample_names: Optional sequence of sample names (column names).
+        feature_names: Optional sequence of feature names (row names).
+        lm_fit: Optional R object from `limma::lmFit`.
+        contrast_fit: Optional R object from `limma::contrasts.fit`.
+        ebayes: Optional R object from `limma::eBayes`.
+        design: Optional design matrix (samples × covariates) as a pandas DataFrame.
+        ndups: Optional number of technical replicates (if applicable).
+        method: Fitting method used, e.g., `"ls"` (least squares) or `"robust"`.
+        coefficients: Optional pandas DataFrame of extracted coefficients.
+        metadata: Optional free-form dictionary for additional metadata.
+    """
     sample_names: Optional[Sequence[str]] = None  # Sample names (column names)
     feature_names: Optional[Sequence[str]] = None  # Feature names (row names)
     lm_fit: Optional[Any] = None  # R object from lmFit
@@ -394,7 +412,8 @@ class LimmaResults:
 
         if self.lm_fit is not None:
             r = get_r_environment()
-            return list(r.ro.baseenv["colnames"](r.ro.baseenv["(self.lm_fit)))
+            # return list(r.ro.baseenv["colnames"](r.ro.baseenv["(self.lm_fit)))
+            return list(r.ro.baseenv["colnames"](self.lm_fit))
         return ()
     def get_feature_names(self) -> Sequence[str]:
         """Get feature names from the design matrix or fit object."""
@@ -406,6 +425,7 @@ class LimmaResults:
             return list(r.ro.baseenv["rownames"](self.lm_fit))
         return ()
     def get_lmfit_names(self) -> Sequence[str]:
+        """Get the slot names of the lm_fit object for access and conversion."""
         r = get_r_environment()
         return list(r.ro.baseenv["names"](self.lm_fit))
     def get_coefficients(self) -> pd.DataFrame:
@@ -417,7 +437,7 @@ class LimmaResults:
             
         return RConverters.rmatrix_to_pandas(coefs_r)
     
-    def e_bayes(self) -> LimmaResults:
+    def e_bayes(self) -> LimmaModel:
         """Run eBayes on the lm_fit object and store the result."""
         assert self.lm_fit is not None, "lm_fit must be set to run eBayes"
         _r = get_r_environment()
@@ -448,9 +468,7 @@ def lm_fit(
         **kwargs: Additional keyword arguments forwarded to `limma::lmFit`.
 
     Returns:
-        RESummarizedExperiment: If `se` is a `Limma`, returns a cloned `Limma`
-        with `lm_fit` set. If `se` is a bare `RESummarizedExperiment`, returns a
-        `Limma` instance that copies `se`'s state and stores the `lm_fit`.
+        LimmaModel: An instance of `LimmaModel` with the `lm_fit` R object set.
 
     Raises:
         AssertionError: If `ndups` is provided but not an integer.
@@ -460,7 +478,7 @@ def lm_fit(
     _r = _rmana
     limma_pkg = _limma()
 
-    lmres = LimmaResults(method=method, sample_names=se.column_names, feature_names=se.row_names)
+    lmres = LimmaModel(method=method, sample_names=se.column_names, feature_names=se.row_names)
 
     exprs_r = se.assay_r("log_expr")  # or whichever assay
     design_r = _df_to_r_matrix(design)
@@ -479,44 +497,15 @@ def lm_fit(
     fit = limma_pkg.lmFit(exprs_r, design_r, weights = weights, method = method, **kwargs)
     lmres.lm_fit = fit
 
-    if return_result_object:
-        # return the LimmaResults object directly
-        # lmres.coefficients = pd.DataFrame(fit.rx2("coefficients"))
-        # lmres.metadata = dict(se.metadata)
-        return lmres
+    return lmres
 
-    if isinstance(se, Limma):
-        return se._clone(
-            lm_fit=fit
-        )
-    elif isinstance(se, RESummarizedExperiment):
-        lm_obj = Limma()
-        lm_obj.__dict__.update(se.__dict__)
-        return lm_obj._clone(
-            lm_fit=fit
-        )
-    else:
-        raise TypeError("Expected a RESummarizedExperiment or Limma object")
-    return fit
-    # coefficients matrix is fit$coefficients
-    coefs_r = fit.rx2("coefficients")
-    assays = dict(se.assays)
-    assays["coefficients"] = RMatrixAdapter(coefs_r, _r)
-    return RESummarizedExperiment(
-        assays=assays,
-        row_data=se.row_data_df(),
-        column_data=se.col_data_df(),
-        row_names=se.row_names,
-        column_names=se.column_names,
-        metadata=dict(se.metadata),
-    )
 
 # ——— 6) contrasts.fit.default & eBayes.default & topTable.default — similar pattern ———
 # You can call contrasts.fit_default(), then eBayes_default(), then topTable_default()
 # and store their returned matrices/data.frames into assays or metadata columns.
 
 def contrasts_fit(
-    se: Limma,
+    lm_obj: LimmaModel,
     contrast: Sequence[int | float],
 ):
     """Apply `limma::contrasts.fit` to an existing `lm_fit` in a `Limma` object.
@@ -524,21 +513,18 @@ def contrasts_fit(
     Args:
         se: A `Limma` instance with `lm_fit` set.
         contrast: 1D array-like contrast vector (length = number of columns in the design).
+            Can be created using formulaic_contrasts or manually.
 
     Returns:
-        Limma: A cloned `Limma` object with `contrast_fit` updated from `contrasts.fit`.
+        LimmaModel: A new `LimmaModel` instance with the `contrast_fit` R object set.
 
     Raises:
         AssertionError: If `se` is not `Limma`, or `lm_fit` is missing, or
             `contrast` is not 1D.
     """
-    """
-    Apply contrasts.fit to the lm_fit object in a Limma instance.
-    Returns a new Limma with updated lm_fit.
-    """
 
-    assert isinstance(se, Limma), "se must be a Limma instance"
-    assert se.lm_fit is not None, "lm_fit must be set in the Limma instance"
+    assert isinstance(lm_obj, LimmaModel), "se must be a Limma instance"
+    assert lm_obj.lm_fit is not None, "lm_fit must be set in the Limma instance"
     assert isinstance(contrast, (list, np.ndarray, pd.Series)), "contrast must be a list or numpy array"
 
     _r = _rmana
@@ -549,13 +535,16 @@ def contrasts_fit(
     contrast_r = _r.ro.FloatVector(contrast)
     
     # apply contrasts.fit
-    fit_r = limma_pkg.contrasts_fit(se.lm_fit, contrast=contrast_r)
+    fit_r = limma_pkg.contrasts_fit(lm_obj.lm_fit, contrast=contrast_r)
     
-    # return a new Limma with updated lm_fit
-    return se._clone(contrast_fit=fit_r)
+    # return LimmaModel object with contrasts fit set
+    return replace(
+        lm_obj,
+        contrast_fit = fit_r
+    )
 
 def top_table(
-    se: Limma,
+    lm_obj: LimmaModel,
     coef: str|int|None = None,
     n: int | None = None,
     adjust_method: str = "BH",
@@ -585,10 +574,10 @@ def top_table(
     Apply topTable.default to the contrast_fit object in a Limma instance.
     Returns a pandas DataFrame with the top results.
     """
-    assert isinstance(se, Limma), "se must be a Limma instance"
+    assert isinstance(lm_obj, LimmaModel), "se must be a Limma instance"
     # assert se.contrast_fit is not None, "contrast_fit must be set in the Limma instance"
 
-    r_fit = se.contrast_fit if se.contrast_fit is not None else se.lm_fit
+    r_fit = lm_obj.contrast_fit if lm_obj.contrast_fit is not None else lm_obj.lm_fit
     assert r_fit is not None, "lm_fit or contrast_fit must be set in the Limma instance"
 
     _r = _rmana
@@ -597,7 +586,8 @@ def top_table(
     eb = limma_pkg.eBayes(r_fit)
 
     if n is None:
-        n = se.shape[0]   
+        
+        n = int(_r.r2py(_r.ro.baseenv["nrow"](r_fit)))
     
     if coef is None:
         # default to the first coefficient (1-based index)

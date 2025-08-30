@@ -6,6 +6,7 @@ from biocframe import BiocFrame
 from summarizedexperiment import SummarizedExperiment
 
 from pyrtools.lazy_r_env import get_r_environment, r
+from pyrtools.r_converters import RConverters
 
 
 class RMatrixAdapter:
@@ -336,4 +337,56 @@ class RESummarizedExperiment(SummarizedExperiment):
             row_names=row_names,
             column_names=col_names,
             metadata=dict(self.metadata)
+        )
+    
+    def to_summarized_experiment(self) -> SummarizedExperiment:
+        """Convert to a base ``SummarizedExperiment``, converting R matrices to NumPy.
+
+        Returns:
+            SummarizedExperiment: New instance with all assays as NumPy arrays.
+        """
+        new_assays = {}
+        assay_names = self.assay_names
+        for assay in assay_names:
+            new_assays[assay] = self.assays[assay].to_numpy()
+        
+        return SummarizedExperiment(
+            assays=new_assays,
+            row_data=self.row_data,
+            column_data=self.col_data,
+            row_names=self.row_names,
+            column_names=self.column_names,
+            metadata=dict(self.metadata)
+        )
+    
+    @staticmethod
+    def from_summarized_experiment(se: SummarizedExperiment) -> "RESummarizedExperiment":
+        """Create an ``RESummarizedExperiment`` from a base ``SummarizedExperiment``.
+
+        Args:
+            se: Input ``SummarizedExperiment`` instance.
+
+        Returns:
+            RESummarizedExperiment: New instance with all assays wrapped as
+            ``RMatrixAdapter`` if they are NumPy arrays.
+        """
+        re_assays = {}
+        assay_names = se.assay_names
+
+        colnames = se.colnames
+        rownames = se.rownames
+
+        for assay in assay_names:
+            _assay = se.assays[assay]
+            _assay = RConverters.numpy_to_r_matrix(_assay, rownames=rownames, colnames = colnames)
+
+            re_assays[assay] = _assay
+
+        return RESummarizedExperiment(
+            assays=re_assays,
+            row_data=se.row_data,
+            column_data=se.column_data,
+            row_names=se.rownames,
+            column_names=se.colnames,
+            metadata=dict(se.metadata)
         )

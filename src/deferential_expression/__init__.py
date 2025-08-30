@@ -1,2 +1,2 @@
-# deferential_expression/__init__.py
-from types import SimpleNamespace
+from . import edger
+from . resummarizedexperiment import RESummarizedExperiment
