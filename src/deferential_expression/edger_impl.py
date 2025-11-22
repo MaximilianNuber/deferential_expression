@@ -503,12 +503,13 @@ def calc_norm_factors(
         )
     norm_factors = np.asarray(r_factors)
 
-    new_cols = BiocFrame({"norm.factors": norm_factors})
+    # new_cols = BiocFrame({"norm.factors": norm_factors})
     coldata = obj.get_column_data()
 
     import biocutils as ut
 
-    new_cols = ut.combine_columns(coldata, new_cols)
+    # new_cols = ut.combine_columns(coldata, new_cols)
+    new_cols = coldata.set_column("norm.factors", norm_factors)
 
     return obj.set_column_data(new_cols)
 
