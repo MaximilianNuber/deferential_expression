@@ -50,7 +50,7 @@ jobs:
           pip install -e .
 
           # test deps
-          pip install pytest pytest-cov rpy2 biocframe summarizedexperiment
+          pip install pytest pytest-cov rpy2 biocframe summarizedexperiment pandas numpy
 
       - name: Run tests with coverage
         run: |
