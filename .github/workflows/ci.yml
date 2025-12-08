@@ -50,7 +50,7 @@ jobs:
           pip install -e .
 
           # test deps
-          pip install pytest pytest-cov rpy2 biocframe summarizedexperiment pandas numpy
+          pip install pytest pytest-cov rpy2 biocframe summarizedexperiment pandas numpy h5py
           pip install "git+https://github.com/MaximilianNuber/bioc2ri.git"
 
       - name: Run tests with coverage
