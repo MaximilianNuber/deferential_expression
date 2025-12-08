@@ -4,7 +4,7 @@ from typing import Any, Optional, Sequence, Union
 
 # Singleton manager for lazy rpy2 imports
 import functools
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict, Optional, Type, Union, Protocol
 
 import pandas as pd
 import numpy as np
@@ -222,3 +222,46 @@ class Rpy2Manager:
     def r2py(self) -> Any: # Your custom r2py function
         self.__init__()
         return self._r2py_func
+    
+
+from typing import Any, Callable, ContextManager, Protocol, Sequence, runtime_checkable
+
+
+@runtime_checkable
+class Rpy2ManagerProto(Protocol):
+    """
+    Minimal protocol for the rpy2 manager/namespace that get_r_environment()
+    returns. This is structural: anything with these attributes will satisfy it.
+    """
+
+    # Core rpy2 "ro" namespace (rpy2.robjects)
+    ro: Any
+
+    # Converters / conversion helpers
+    numpy2ri: Any      # usually rpy2.robjects.numpy2ri
+    pandas2ri: Any     # usually rpy2.robjects.pandas2ri
+    conversion: Any    # rpy2.robjects.conversion
+    default_converter: Any
+
+    # Context manager factory: localconverter(...)
+    def localconverter(self, conv) -> ContextManager[None]: ...
+
+    # Function returning the active conversion object
+    def get_conversion(self) -> Any: ...
+
+    # R object constructors
+    ListVector: Any
+    IntVector: Any
+    FloatVector: Any
+    StrVector: Any
+    BoolVector: Any
+
+    # Error / utility bits
+    RRuntimeError: type[Exception]
+    utils_pkg: Any
+    methods_pkg: Any
+
+    # High-level helpers you expose
+    def lazy_import_r_packages(self, packages: Sequence[str]) -> None: ...
+    def py2r(self, obj: Any) -> Any: ...
+    def r2py(self, sexp: Any) -> Any: ...

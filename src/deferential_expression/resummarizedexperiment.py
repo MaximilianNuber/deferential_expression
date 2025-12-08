@@ -1,131 +1,62 @@
-from typing import Any, Optional, Sequence, Union, Dict
+from typing import Any, Optional, Sequence, Union, Dict, no_type_check, cast
 import numpy as np
 import pandas as pd
 
 from biocframe import BiocFrame
 from summarizedexperiment import SummarizedExperiment
+from bioc2ri.rutils import r_dim, is_r
+from bioc2ri.rnames import set_rownames, set_colnames
 
-from pyrtools.lazy_r_env import get_r_environment, r
-from pyrtools.r_converters import RConverters
+from bioc2ri.lazy_r_env import get_r_environment, r
+from bioc2ri import numpy_plugin
+from .rpy2_manager import Rpy2ManagerProto
+
+from numpy.typing import NDArray
+NumericDType = np.integer[Any] | np.floating[Any]
+NumericArray = NDArray[NumericDType]
+
+IndexLike = Union[
+    slice,
+    int,
+    Sequence[int],
+    Sequence[bool],
+    NDArray[NumericDType],
+    pd.Index,
+]
+
+np_eng = numpy_plugin()
 
 
-class RMatrixAdapter:
-    """Thin wrapper around an rpy2 R matrix to preserve R backing.
+def numpy_to_r_matrix(
+    mat: Any,
+    rownames: Optional[Sequence[str]] = None,
+    colnames: Optional[Sequence[str]] = None,
+) -> Any:
+    rmat = np_eng.py2r(mat)
 
-    This adapter:
-      * Stores a reference to the underlying R matrix (``rmat``).
-      * Exposes ``shape`` without converting to NumPy.
-      * Implements ``__getitem__`` to slice **in R** and return another
-        ``RMatrixAdapter`` (prevents accidental NumPy materialization).
-      * Provides ``to_numpy()`` for explicit conversion and ``__array__`` to
-        allow NumPy coercion when needed.
-
-    Attributes:
-        _rmat: The underlying rpy2 SEXP matrix.
-        _shape: Tuple ``(n_rows, n_cols)`` inferred from R ``dim``.
-        _r: The rpy2 manager/environment used for conversions.
-    """
-    __slots__ = ("_rmat", "_shape", "_r")
-    def __init__(self, rmat: Any, r_manager):
-        """Initialize the adapter.
-
-        Args:
-            rmat: An R matrix SEXP object (rpy2).
-            r_manager: rpy2 manager/environment providing ``ro`` and converters.
-
-        Notes:
-            ``shape`` is computed from the R-level ``dim(rmat)`` at init time.
-        """
-        self._rmat = rmat
-        self._r = get_r_environment()
-        dims = r_manager.ro.baseenv["dim"](rmat)
-        self._shape = (int(dims[0]), int(dims[1]))
-    @property
-    def shape(self): 
-        """Tuple[int, int]: Matrix shape (rows, cols) without conversion."""
-        return self._shape
-    @property
-    def rmat(self):  
-        """Any: Underlying rpy2 SEXP matrix (read-only reference)."""
-        return self._rmat
-    def to_numpy(self):
-        """Convert the wrapped R matrix to a NumPy array.
-
-        Returns:
-            np.ndarray: Dense NumPy array with the same values as the R matrix.
-        """
-        with self._r.localconverter(self._r.default_converter + self._r.numpy2ri.converter):
-            return self._r.get_conversion().rpy2py(self._rmat)
-    # def __getitem__(self, idx):
-    #     return self.to_numpy()[idx]
-    # CRITICAL FIX: keep results as an RMatrixAdapter, not a NumPy array
-    def __getitem__(self, key):
-        """Slice the R matrix in R and return another ``RMatrixAdapter``.
-
-        Args:
-            key: Either ``rows`` or ``(rows, cols)`` using Python indexing
-                (ints, slices, boolean masks, or integer arrays).
-
-        Returns:
-            RMatrixAdapter: Adapter wrapping the sliced R matrix.
-
-        Raises:
-            IndexError: If more than two indices are provided.
-        """
-        if not isinstance(key, tuple):
-            rows, cols = key, slice(None)
+    if rownames is not None:
+        if not is_r(rownames):
+            rn_arr = np.asarray(rownames, dtype=str)
+            rmat = set_rownames(rmat, rn_arr)
         else:
-            if len(key) != 2:
-                raise IndexError("Use 2D indexing: [rows, cols].")
-            rows, cols = key
-        return _slice_rmat(self, rows, cols)
+            rmat = set_rownames(rmat, rownames)
 
-    def __array__(self, dtype=None):
-        """Support implicit NumPy coercion (e.g., ``np.asarray(adapter)``).
+    if colnames is not None:
+        if not is_r(colnames):
+            cn_arr = np.asarray(colnames, dtype=str)
+            rmat = set_colnames(rmat, cn_arr)
+        else:
+            rmat = set_colnames(rmat, colnames)
 
-        Args:
-            dtype: Optional dtype to cast to.
+    return rmat
 
-        Returns:
-            np.ndarray: The converted NumPy array (possibly view-cast).
-        """
-        arr = self.to_numpy()
-        if dtype is not None:
-            arr = arr.astype(dtype, copy=False)
-        return arr
 
-def _df_to_r_matrix(df: pd.DataFrame) -> Any:
-    """Convert a pandas DataFrame to an R matrix, preserving row/col names.
-
-    Args:
-        df: DataFrame with numeric values; index/columns become dimnames.
-
-    Returns:
-        Any: rpy2 SEXP matrix with ``rownames`` and ``colnames`` set.
-    """
-    with r.localconverter(r.default_converter + r.numpy2ri.converter):
-        r_mat = r.get_conversion().py2rpy(df.values)
-    r_mat = r.ro.baseenv["rownames<-"](r_mat, r.StrVector(df.index.astype(str).to_numpy()))
-    r_mat = r.ro.baseenv["colnames<-"](r_mat, r.StrVector(df.columns.astype(str).to_numpy()))
-    return r_mat
-
-def _df_to_r_df(df: pd.DataFrame) -> Any:
-    """Convert a pandas DataFrame to an R ``data.frame``.
-
-    Args:
-        df: Input pandas DataFrame.
-
-    Returns:
-        Any: rpy2 SEXP data.frame object.
-    """
-    with r.localconverter(r.default_converter + r.pandas2ri.converter):
-        return r.get_conversion().py2rpy(df)
-
-# ------------------------------------------------------------------
-# RESummarizedExperiment
-# ------------------------------------------------------------------
-
-def _to_r_index(idx, n, *, r=get_r_environment()):
+def _to_r_index(
+    idx: IndexLike,
+    n: int,
+    *,
+    r: Any = None,
+) -> Any:
     """Build an R index (logical/integer) from a Python index for 1-based R.
 
     Args:
@@ -135,26 +66,28 @@ def _to_r_index(idx, n, *, r=get_r_environment()):
 
     Returns:
         Any: R index vector suitable for subsetting (logical or integer).
-
-    Notes:
-        * Slices are translated to 1-based sequences.
-        * Boolean arrays are converted to R logical vectors.
-        * Integer arrays are shifted by +1 for 1-based R indexing.
-        * If ``idx`` is None/unsupported, returns ``1:n`` (all).
     """
+    if r is None:
+        r = get_r_environment()
+
     if isinstance(idx, slice):
         start, stop, step = idx.indices(n)
-        return r.IntVector(list(range(start + 1, stop + 1, step)))  # R is 1-based
+        # R is 1-based
+        return r.IntVector(list(range(start + 1, stop + 1, step)))
+
     if isinstance(idx, (list, np.ndarray, pd.Index)):
-        idx = np.asarray(idx)
-        if idx.dtype == bool:
-            return r.BoolVector(idx.tolist())
-        return r.IntVector((idx + 1).tolist())
+        idx_arr = np.asarray(idx)
+        if idx_arr.dtype == bool:
+            return r.BoolVector(idx_arr.tolist())
+        return r.IntVector((idx_arr + 1).tolist())
+
     if isinstance(idx, int):
         return r.IntVector([idx + 1])
-    return r.IntVector(list(range(1, n + 1)))  # fallback: ':'
-    
 
+    # fallback: ':' (all indices)
+    return r.IntVector(list(range(1, n + 1)))
+    
+@no_type_check
 def _slice_rmat(adapter: "RMatrixAdapter", rows, cols):
     """Slice an R-backed matrix using R subsetting and wrap the result.
 
@@ -176,7 +109,125 @@ def _slice_rmat(adapter: "RMatrixAdapter", rows, cols):
     out = bracket(rm, ridx, cidx)
     return RMatrixAdapter(out, r)
 
-class RESummarizedExperiment(SummarizedExperiment):
+class RMatrixAdapter:
+    """Thin wrapper around an rpy2 R matrix to preserve R backing.
+
+    This adapter:
+      * Stores a reference to the underlying R matrix (``rmat``).
+      * Exposes ``shape`` without converting to NumPy.
+      * Implements ``__getitem__`` to slice **in R** and return another
+        ``RMatrixAdapter`` (prevents accidental NumPy materialization).
+      * Provides ``to_numpy()`` for explicit conversion and ``__array__`` to
+        allow NumPy coercion when needed.
+
+    Attributes:
+        _rmat: The underlying rpy2 SEXP matrix.
+        _shape: Tuple ``(n_rows, n_cols)`` inferred from R ``dim``.
+        _r: The rpy2 manager/environment used for conversions.
+    """
+    __slots__ = ("_rmat", "_shape", "_r")
+    def __init__(self, rmat: Any, r_manager: Rpy2ManagerProto):
+        """Initialize the adapter.
+
+        Args:
+            rmat: An R matrix SEXP object (rpy2).
+            r_manager: rpy2 manager/environment providing ``ro`` and converters.
+
+        Notes:
+            ``shape`` is computed from the R-level ``dim(rmat)`` at init time.
+        """
+        self._rmat = rmat
+        self._r = get_r_environment()
+        dims = r_dim(rmat)
+        self._shape = (int(dims[0]), int(dims[1]))
+    @property
+    def shape(self) -> tuple[int, int]: 
+        """Tuple[int, int]: Matrix shape (rows, cols) without conversion."""
+        return self._shape
+    @property
+    def rmat(self) -> Any:  
+        """Any: Underlying rpy2 SEXP matrix (read-only reference)."""
+        return self._rmat
+    def to_numpy(self) -> NDArray[NumericDType]:
+        """Convert the wrapped R matrix to a NumPy array.
+
+        Returns:
+            np.ndarray: Dense NumPy array with the same values as the R matrix.
+        """
+        with self._r.localconverter(self._r.default_converter + self._r.numpy2ri.converter):
+            npmat = self._r.get_conversion().rpy2py(self._rmat) 
+        return npmat # type: ignore
+    # def __getitem__(self, idx):
+    #     return self.to_numpy()[idx]
+    # CRITICAL FIX: keep results as an RMatrixAdapter, not a NumPy array
+    def __getitem__(self, key: tuple[int, int] | int) -> "RMatrixAdapter":
+        """Slice the R matrix in R and return another ``RMatrixAdapter``.
+
+        Args:
+            key: Either ``rows`` or ``(rows, cols)`` using Python indexing
+                (ints, slices, boolean masks, or integer arrays).
+
+        Returns:
+            RMatrixAdapter: Adapter wrapping the sliced R matrix.
+
+        Raises:
+            IndexError: If more than two indices are provided.
+        """
+
+        rows: IndexLike
+        cols: IndexLike
+
+        if isinstance(key, tuple):
+            if len(key) != 2:
+                raise IndexError("Use 2D indexing: [rows, cols].")
+            rows, cols = key
+        else:
+            rows, cols = key, slice(None)
+
+        return _slice_rmat(self, rows, cols) # type: ignore
+
+
+    def __array__(self, dtype:Any=None) -> NDArray[NumericDType]:
+        """Support implicit NumPy coercion (e.g., ``np.asarray(adapter)``).
+
+        Args:
+            dtype: Optional dtype to cast to.
+
+        Returns:
+            np.ndarray: The converted NumPy array (possibly view-cast).
+        """
+        arr = self.to_numpy()
+        if dtype is not None:
+            arr = arr.astype(dtype, copy=False)
+        return arr
+
+def _df_to_r_matrix(df: pd.DataFrame) -> Any:
+    """Convert a pandas DataFrame to an R matrix, preserving dimnames."""
+    # bioc2ri handles numpy conversion + dimnames; we just pass arrays and names
+    mat = np_eng.py2r(df.to_numpy(copy=False))
+    rownames = np.asarray(df.index).astype("str")
+    mat = set_rownames(mat, np_eng.py2r(rownames))
+    colnames = np.asarray(df.columns).astype("str")
+    mat = set_colnames(mat, np_eng.py2r(colnames))
+    return mat
+
+def _df_to_r_df(df: pd.DataFrame) -> Any:
+    """Convert a pandas DataFrame to an R ``data.frame``.
+
+    Args:
+        df: Input pandas DataFrame.
+
+    Returns:
+        Any: rpy2 SEXP data.frame object.
+    """
+    with r.localconverter(r.default_converter + r.pandas2ri.converter):
+        return r.get_conversion().py2rpy(df)
+
+# ------------------------------------------------------------------
+# RESummarizedExperiment
+# ------------------------------------------------------------------
+
+class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
     """
     Drop-in subclass that auto-wraps R matrices (rpy2) with RMatrixAdapter,
     but keeps ctor-compatible signature so slicing works.
@@ -190,8 +241,8 @@ class RESummarizedExperiment(SummarizedExperiment):
         row_names: Optional[Sequence[str]] = None,
         column_names: Optional[Sequence[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ):
+        **kwargs: Any
+    ) -> None:
         """Initialize an ``RESummarizedExperiment`` with optional R-backed assays.
 
         Args:
@@ -229,7 +280,7 @@ class RESummarizedExperiment(SummarizedExperiment):
             Any: ``RMatrixAdapter`` if ``x`` is an R matrix; otherwise ``x`` unchanged.
         """
         try:
-            from rpy2.rinterface import Sexp
+            from rpy2.rinterface import Sexp # type: ignore[attr-defined]
             if hasattr(x, "__sexp__") and "matrix" in x.rclass:
                 return RMatrixAdapter(x, get_r_environment())
         except Exception:
@@ -237,7 +288,7 @@ class RESummarizedExperiment(SummarizedExperiment):
         return x
 
     # ------- convenience getters -------
-    def assay(self, name: str, as_numpy=False, as_pandas=False):
+    def assay(self, name: str, as_numpy:bool=False, as_pandas:bool=False): # type: ignore[no-untyped-def]
         """Retrieve an assay by name with optional conversion.
 
         Args:
@@ -263,7 +314,7 @@ class RESummarizedExperiment(SummarizedExperiment):
             return pd.DataFrame(arr)
         return arr if as_numpy or as_pandas else obj
 
-    def assay_r(self, name: str):
+    def assay_r(self, name: str) -> Any:
         """Return the raw R matrix for an R-backed assay.
 
         Args:
@@ -279,17 +330,135 @@ class RESummarizedExperiment(SummarizedExperiment):
         if isinstance(obj, RMatrixAdapter):
             return obj.rmat
         raise TypeError(f"Assay '{name}' is not an R matrix adapter.")
+    
+    def set_assay(
+        self,
+        name: str,
+        value: Any,
+        *,
+        rownames: Optional[Sequence[str]] = None,
+        colnames: Optional[Sequence[str]] = None,
+    ) -> "RESummarizedExperiment":
+        """
+        Return a new RESummarizedExperiment with an updated assay.
+
+        This is a functional-style "setter": it does NOT mutate the current
+        object, but instead returns a new instance with the modified assays
+        mapping. Python arrays are automatically converted to R-backed
+        matrices via RMatrixAdapter.
+
+        Parameters
+        ----------
+        name:
+            Assay name (e.g. "counts", "logcounts").
+        value:
+            Matrix-like object. Can be:
+
+            * np.ndarray (or array-like)
+            * pandas.DataFrame
+            * rpy2 R matrix (SEXP) – wrapped in RMatrixAdapter
+            * RMatrixAdapter – stored as-is
+
+        rownames, colnames:
+            Optional explicit row/column names. If omitted, we fall back to
+            self.row_names / self.column_names where available.
+        """
+        # Start from a shallow copy of the existing assays (functional style)
+        new_assays: Dict[str, Any] = dict(self.assays)
+
+        if isinstance(value, RMatrixAdapter):
+            new_assays[name] = value
+        else:
+            is_r_matrix = False
+            try:
+                if hasattr(value, "__sexp__") and "matrix" in value.rclass:
+                    is_r_matrix = True
+            except Exception:
+                is_r_matrix = False
+
+            if is_r_matrix:
+                new_assays[name] = RMatrixAdapter(value, get_r_environment())
+            else:
+                # Python-side data -> NumPy
+                if isinstance(value, pd.DataFrame):
+                    arr = value.to_numpy(copy=False)
+
+                    # rownames
+                    if rownames is not None:
+                        rn: Optional[Sequence[str]] = list(rownames)
+                    else:
+                        rn = [str(x) for x in value.index.to_list()]
+
+                    # colnames
+                    if colnames is not None:
+                        cn: Optional[Sequence[str]] = list(colnames)
+                    else:
+                        cn = [str(x) for x in value.columns.to_list()]
+                else:
+                    arr = np.asarray(value)
+
+                    if rownames is not None:
+                        rn = list(rownames)
+                    else:
+                        rn = (
+                            list(self.row_names)
+                            if self.row_names is not None
+                            else None
+                        )
+
+                    if colnames is not None:
+                        cn = list(colnames)
+                    else:
+                        cn = (
+                            list(self.column_names)
+                            if self.column_names is not None
+                            else None
+                        )
+
+                # sanity checks
+                if rn is not None and len(rn) != arr.shape[0]:
+                    raise ValueError(
+                        f"Length of rownames ({len(rn)}) does not match "
+                        f"number of rows in assay ({arr.shape[0]})."
+                    )
+                if cn is not None and len(cn) != arr.shape[1]:
+                    raise ValueError(
+                        f"Length of colnames ({len(cn)}) does not match "
+                        f"number of columns in assay ({arr.shape[1]})."
+                    )
+
+                rmat = numpy_to_r_matrix(
+                    arr,
+                    rownames=rn,
+                    colnames=cn,
+                )
+                new_assays[name] = RMatrixAdapter(rmat, get_r_environment())
+
+        return self.__class__(
+            assays=new_assays,
+            row_data=self.row_data_df if self.row_data is not None else None,
+            column_data=self.column_data_df if self.column_data is not None else None,
+            row_names=self.row_names,
+            column_names=self.column_names,
+            metadata=dict(self.metadata),
+        )
+
 
     @property
     def row_data_df(self) -> Optional[pd.DataFrame]:
         """pandas.DataFrame | None: Row (feature) annotations as pandas."""
-        return self.row_data.to_pandas()
+        if self.row_data is None:
+            return None
+        return self.row_data.to_pandas() # type: ignore
 
     @property
     def column_data_df(self) -> Optional[pd.DataFrame]:
         """pandas.DataFrame | None: Column (sample) annotations as pandas."""
-        return self.column_data.to_pandas()
+        if self.column_data is None:
+            return None
+        return self.column_data.to_pandas() # type: ignore
 
+    @no_type_check
     def __getitem__(self, args):
         """Slice the experiment and preserve R-backed assays.
 
@@ -378,7 +547,7 @@ class RESummarizedExperiment(SummarizedExperiment):
 
         for assay in assay_names:
             _assay = se.assays[assay]
-            _assay = RConverters.numpy_to_r_matrix(_assay, rownames=rownames, colnames = colnames)
+            _assay = numpy_to_r_matrix(_assay, rownames=rownames, colnames = colnames)
 
             re_assays[assay] = _assay
 

@@ -326,7 +326,7 @@ def normalize_between_arrays(
 def remove_batch_effect(
     se: RESummarizedExperiment,
     batch: Union[pd.Series, Sequence, np.ndarray],
-    exprs_assay: str = "log_expr_norm",
+    exprs_assay: str = "log_expr",
     corrected_assay: str = "log_expr_bc",
     design: Optional[pd.DataFrame] = None,
     **kwargs
