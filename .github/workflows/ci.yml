@@ -51,6 +51,7 @@ jobs:
 
           # test deps
           pip install pytest pytest-cov rpy2 biocframe summarizedexperiment pandas numpy
+          pip install git+git@github.com:MaximilianNuber/bioc2ri.git
 
       - name: Run tests with coverage
         run: |
