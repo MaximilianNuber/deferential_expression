@@ -1,8 +1,7 @@
-from typing import Any, Optional, Sequence, Union, Dict, no_type_check, cast
+from typing import Any, Optional, Sequence, Union, Dict, no_type_check
 import numpy as np
 import pandas as pd
 
-from biocframe import BiocFrame
 from summarizedexperiment import SummarizedExperiment
 from bioc2ri.rutils import r_dim, is_r
 from bioc2ri.rnames import set_rownames, set_colnames
@@ -86,6 +85,21 @@ def _to_r_index(
 
     # fallback: ':' (all indices)
     return r.IntVector(list(range(1, n + 1)))
+
+
+def _is_r_matrix(value: Any) -> bool:
+    """Check if value is an R matrix SEXP.
+    
+    Args:
+        value: Object to check.
+    
+    Returns:
+        bool: True if value is an R matrix, False otherwise.
+    """
+    try:
+        return hasattr(value, "__sexp__") and "matrix" in value.rclass
+    except (AttributeError, TypeError):
+        return False
     
 @no_type_check
 def _slice_rmat(adapter: "RMatrixAdapter", rows, cols):
@@ -126,18 +140,19 @@ class RMatrixAdapter:
         _r: The rpy2 manager/environment used for conversions.
     """
     __slots__ = ("_rmat", "_shape", "_r")
-    def __init__(self, rmat: Any, r_manager: Rpy2ManagerProto):
+    def __init__(self, rmat: Any, r_manager: Optional[Rpy2ManagerProto] = None):
         """Initialize the adapter.
 
         Args:
             rmat: An R matrix SEXP object (rpy2).
-            r_manager: rpy2 manager/environment providing ``ro`` and converters.
+            r_manager: Optional rpy2 manager/environment providing ``ro`` and converters.
+                If None, uses the default environment from get_r_environment().
 
         Notes:
             ``shape`` is computed from the R-level ``dim(rmat)`` at init time.
         """
         self._rmat = rmat
-        self._r = get_r_environment()
+        self._r = r_manager if r_manager is not None else get_r_environment()
         dims = r_dim(rmat)
         self._shape = (int(dims[0]), int(dims[1]))
     @property
@@ -160,7 +175,7 @@ class RMatrixAdapter:
     # def __getitem__(self, idx):
     #     return self.to_numpy()[idx]
     # CRITICAL FIX: keep results as an RMatrixAdapter, not a NumPy array
-    def __getitem__(self, key: tuple[int, int] | int) -> "RMatrixAdapter":
+    def __getitem__(self, key: Union[IndexLike, tuple[IndexLike, IndexLike]]) -> "RMatrixAdapter":
         """Slice the R matrix in R and return another ``RMatrixAdapter``.
 
         Args:
@@ -279,16 +294,14 @@ class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
         Returns:
             Any: ``RMatrixAdapter`` if ``x`` is an R matrix; otherwise ``x`` unchanged.
         """
-        try:
-            from rpy2.rinterface import Sexp # type: ignore[attr-defined]
-            if hasattr(x, "__sexp__") and "matrix" in x.rclass:
-                return RMatrixAdapter(x, get_r_environment())
-        except Exception:
-            pass
+        if _is_r_matrix(x):
+            return RMatrixAdapter(x)
         return x
 
     # ------- convenience getters -------
-    def assay(self, name: str, as_numpy:bool=False, as_pandas:bool=False): # type: ignore[no-untyped-def]
+    def assay(
+        self, name: str, as_numpy: bool = False, as_pandas: bool = False
+    ) -> Union[RMatrixAdapter, NDArray[NumericDType], pd.DataFrame, Any]:
         """Retrieve an assay by name with optional conversion.
 
         Args:
@@ -369,29 +382,25 @@ class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
         if isinstance(value, RMatrixAdapter):
             new_assays[name] = value
         else:
-            is_r_matrix = False
-            try:
-                if hasattr(value, "__sexp__") and "matrix" in value.rclass:
-                    is_r_matrix = True
-            except Exception:
-                is_r_matrix = False
-
-            if is_r_matrix:
-                new_assays[name] = RMatrixAdapter(value, get_r_environment())
+            if _is_r_matrix(value):
+                new_assays[name] = RMatrixAdapter(value)
             else:
                 # Python-side data -> NumPy
+                rn: Optional[list[str]]
+                cn: Optional[list[str]]
+                
                 if isinstance(value, pd.DataFrame):
                     arr = value.to_numpy(copy=False)
 
                     # rownames
                     if rownames is not None:
-                        rn: Optional[Sequence[str]] = list(rownames)
+                        rn = list(rownames)
                     else:
                         rn = [str(x) for x in value.index.to_list()]
 
                     # colnames
                     if colnames is not None:
-                        cn: Optional[Sequence[str]] = list(colnames)
+                        cn = list(colnames)
                     else:
                         cn = [str(x) for x in value.columns.to_list()]
                 else:
@@ -522,7 +531,7 @@ class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
         return SummarizedExperiment(
             assays=new_assays,
             row_data=self.row_data,
-            column_data=self.col_data,
+            column_data=self.column_data,
             row_names=self.row_names,
             column_names=self.column_names,
             metadata=dict(self.metadata)

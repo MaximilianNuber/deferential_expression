@@ -13,10 +13,18 @@ def _resolve_batch(
     se: RESummarizedExperiment,
     batch: Union[str, Sequence, np.ndarray, pd.Series],
 ) -> StrVector:
-    """Turn a batch spec into an R character vector.
+    """Convert batch specification to an R character vector.
 
-    - If `batch` is a string → interpret as column name in column_data_df.
-    - Otherwise, treat as sequence/array of labels.
+    Args:
+        se: ``RESummarizedExperiment`` containing column metadata.
+        batch: Batch specification. If string, interpreted as column name in
+            ``column_data``. Otherwise, treated as sequence/array of batch labels.
+
+    Returns:
+        StrVector: rpy2 R character vector suitable for limma functions.
+
+    Raises:
+        KeyError: If ``batch`` is a string but not found in ``column_data``.
     """
     if isinstance(batch, str):
         cd = se.column_data_df
@@ -41,7 +49,41 @@ def remove_batch_effect(
     covariates: Optional[pd.DataFrame] = None,
     **kwargs,
 ) -> RESummarizedExperiment:
-    """Run `limma::removeBatchEffect` to correct an expression assay."""
+    """Remove batch effects from expression data.
+
+    Wraps the R ``limma::removeBatchEffect`` function to adjust for batch effects
+    while preserving biological variation. Can handle one or two batch factors and
+    optional covariates to protect during batch correction.
+
+    Args:
+        se: Input ``RESummarizedExperiment`` with an R-backed expression assay.
+        batch: Primary batch factor. Either a column name in ``column_data`` (string)
+            or an array-like of batch labels (length = n_samples).
+        batch2: Optional secondary batch factor. Same format as ``batch``.
+        exprs_assay: Name of the input expression assay to correct. Default: ``"log_expr"``.
+        corrected_assay: Name for the output batch-corrected assay. Default: ``"log_expr_bc"``.
+        design: Optional design matrix (samples × covariates) as pandas DataFrame.
+            Biological factors in the design are preserved during batch correction.
+        covariates: Optional continuous covariates matrix as pandas DataFrame to adjust for.
+        **kwargs: Additional keyword arguments forwarded to ``limma::removeBatchEffect``.
+
+    Returns:
+        RESummarizedExperiment: New instance with the batch-corrected assay stored under
+            ``corrected_assay`` as an R-backed matrix (``RMatrixAdapter``).
+
+    Raises:
+        KeyError: If ``batch`` or ``batch2`` is a string but not found in ``column_data``.
+
+    Notes:
+        - Original object remains unchanged (functional/immutable style).
+        - The input assay must be R-backed and accessible via ``se.assay_r(exprs_assay)``.
+        - Batch correction is typically applied to log-transformed data.
+
+    Examples:
+        >>> se_corrected = remove_batch_effect(se, batch="batch_id", design=design_df)
+        >>> se_corrected.assay_names
+        ['log_expr', 'log_expr_bc']
+    """
     limma = _limma()
     _r = get_r_environment()
 
@@ -89,70 +131,3 @@ def remove_batch_effect(
         column_names=se.column_names,
         metadata=dict(se.metadata),
     )
-
-
-# ——— 4) removeBatchEffect.default ———
-# def remove_batch_effect(
-#     se: RESummarizedExperiment,
-#     batch: Union[Sequence, str],
-#     batch2: Sequence | str | None = None,
-#     exprs_assay: str = "log_expr",
-#     corrected_assay: str = "log_expr_bc",
-#     design: Optional[pd.DataFrame] = None,
-#     **kwargs
-# ) -> RESummarizedExperiment:
-#     """Run `limma::removeBatchEffect` to correct an expression assay.
-
-#     Args:
-#         se: Input `RESummarizedExperiment` with an R-backed expression assay.
-#         batch: Batch labels per sample (length = n_samples).
-#         exprs_assay: Name of the input expression assay to correct.
-#         corrected_assay: Name for the output batch-corrected assay.
-#         design: Optional design matrix (samples × covariates) used as covariates
-#             to protect biological signal during batch correction.
-#         **kwargs: Additional keyword arguments forwarded to `removeBatchEffect`.
-
-#     Returns:
-#         RESummarizedExperiment: A new object with the batch-corrected assay
-#         stored under `corrected_assay` as an `RMatrixAdapter`.
-#     """
-#     limma = _limma()
-#     _r = get_r_environment()
-#     E_r = se.assay_r(exprs_assay)
-
-#     # batch → R
-#     if isinstance(batch, str):
-#         batch = se.column_data[batch]
-#     batch = np.asarray(batch, dtype=str)
-#     batch_r = _r.StrVector(batch)
-
-#     if batch2 is not None:
-#         if isinstance(batch2, str):
-#             batch2 = se.column_data[batch2]
-#         batch2 = np.asarray(batch2, dtype=str)
-#         batch2_r = _r.StrVector(batch2)
-#     else:
-#         batch2_r = _r.ro.NULL
-
-#     # design optional
-#     design_r = pandas_to_r_matrix(design) if design is not None else _r.ro.NULL
-#     print(type(design_r))
-
-#     rbe = limma.removeBatchEffect
-#     out_r = rbe(
-#         E_r, 
-#         batch=batch_r, 
-#         batch2 = batch2_r,
-#         # design=design_r, 
-#         **kwargs
-#     )
-#     assays = dict(se.assays)
-#     assays[corrected_assay] = RMatrixAdapter(out_r, _r)
-#     return RESummarizedExperiment(
-#         assays=assays,
-#         row_data=se.row_data_df,
-#         column_data=se.column_data_df,
-#         row_names=se.row_names,
-#         column_names=se.column_names,
-#         metadata=dict(se.metadata),
-#     )

@@ -19,4 +19,4 @@ def cpm(obj: "RESummarizedExperiment", assay: str = "counts", **kwargs):
     cpm_mat = pkg.cpm(rmat, **kwargs)
     cpm_mat = RMatrixAdapter(cpm_mat, renv)
 
-    return obj.set_assay(name = "cpm", assay = cpm_mat)
+    return obj.set_assay(name="cpm", value=cpm_mat)

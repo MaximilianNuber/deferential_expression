@@ -1,0 +1,12 @@
+name: deferential_expression
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.8
+  - r-base>=4.0
+  - rpy2
+  - bioconductor-edger
+  - bioconductor-limma
+  - pip

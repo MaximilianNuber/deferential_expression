@@ -19,19 +19,15 @@ pip install deferential_expression
 
 ## Requirements
 
-- **R** (≥ 4.x) with:
-  - `recount3`, `edgeR`, `limma`
+- **R** (≥ 4.x)
 - **Python** (3.10+):
-  - `rpy2`, `pandas`, `numpy`, `biocframe`, `summarizedexperiment`, `pyrtools`
+  - `rpy2`, `pandas`, `numpy`, `summarizedexperiment`, `pyrtools`
   - this package: `deferential_expression`
 
-Install R pkgs once:
+**Automatic R Dependency Management**:  
+This package automatically checks for required R packages (e.g., `edgeR`, `limma`) when you first use them. If they are missing, it attempts to install them via `BiocManager`. You do not need to manually run R installation scripts.
 
-```r
-install.packages("BiocManager", repos="https://cloud.r-project.org")
-BiocManager::install(c("recount3","edgeR","limma"), ask=FALSE, update=FALSE)
-```
-## Install (from sourse)
+## Install (from source)
 ```
 pip install -e .
 # (optional) docs extras if you defined them:

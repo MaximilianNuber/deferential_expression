@@ -17,19 +17,35 @@ def voom_with_quality_weights(
     plot: bool = False,
     **kwargs
 ) -> RESummarizedExperiment:
-    """Run `limma::voomWithQualityWeights` (default) to compute log-CPM and QW weights.
+    """Run limma's voom with quality weights on count data.
+
+    Wraps the R ``limma::voomWithQualityWeights`` method, which extends standard voom
+    by computing sample-specific quality weights in addition to observation weights.
+    Useful for detecting and downweighting poor-quality samples.
 
     Args:
-        se: Input `RESummarizedExperiment` containing a `"counts"` R-backed assay.
+        se: Input ``RESummarizedExperiment`` containing a ``"counts"`` R-backed assay.
         design: Design matrix (samples × covariates) as a pandas DataFrame.
-        log_expr_assay: Name for the output log-expression assay.
-        weights_assay: Name for the output weights assay.
-        plot: Whether to enable voom’s diagnostic plot in R.
-        **kwargs: Additional keyword arguments forwarded to `voomWithQualityWeights`.
+        lib_size: Optional library sizes per sample (length = n_samples). If ``None``,
+            attempts to use ``column_data['norm.factors']`` if present.
+        log_expr_assay: Name for the output log-expression assay. Default: ``"log_expr"``.
+        weights_assay: Name for the output weights assay. Default: ``"weights"``.
+        plot: If ``True``, generates diagnostic plots in R.
+        **kwargs: Additional keyword arguments forwarded to ``limma::voomWithQualityWeights``.
 
     Returns:
-        RESummarizedExperiment: A new object with `log_expr_assay` and `weights_assay`
-        assays added as `RMatrixAdapter`s.
+        RESummarizedExperiment: New instance with added ``log_expr_assay`` and
+            ``weights_assay`` as R-backed matrices (``RMatrixAdapter``).
+
+    Notes:
+        - Requires a ``"counts"`` assay accessible via ``se.assay_r("counts")``.
+        - Sample-specific quality weights are incorporated into the returned weights matrix.
+        - Original object remains unchanged (functional/immutable style).
+
+    Examples:
+        >>> se_voom = voom_with_quality_weights(se, design=design_df)
+        >>> se_voom.assay_names
+        ['counts', 'log_expr', 'weights']
     """
     limma = _limma()
     _r = get_r_environment()

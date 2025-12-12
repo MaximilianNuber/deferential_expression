@@ -131,27 +131,33 @@ def lm_fit(
     return_result_object: bool = False,
     **kwargs: Any,
 ) -> LimmaModel:
-    """
-    Run `limma::lmFit` on an expression assay and store the fit in a `LimmaModel`.
+    """Fit linear model to expression data using limma.
+
+    Wraps the R ``limma::lmFit`` function to fit a linear model for each gene/feature.
+    Returns a ``LimmaModel`` container with the fitted model object and metadata.
 
     Args:
-        se:
-            Input `RESummarizedExperiment` containing a `"log_expr"` assay
-            (by convention) and optionally a `"weights"` assay.
-        design:
-            Design matrix (samples × covariates) as a pandas DataFrame.
-        ndups:
-            Number of technical replicates per unique sample (or `None`).
-        method:
-            Fitting method, e.g., `"ls"` (least squares) or `"robust"`.
-        return_result_object:
-            Currently unused flag; reserved for future API variants.
-        **kwargs:
-            Additional keyword arguments forwarded to `limma::lmFit`.
+        se: Input ``RESummarizedExperiment`` containing a ``"log_expr"`` assay
+            (by convention) and optionally a ``"weights"`` assay for precision weights.
+        design: Design matrix (samples × covariates) as a pandas DataFrame.
+        ndups: Number of technical replicates per unique sample. If ``None``, assumes
+            no technical replication.
+        method: Fitting method. Options: ``"ls"`` (least squares) or ``"robust"``
+            (robust regression with M-estimation). Default: ``"ls"``.
+        return_result_object: Reserved for future API extensions. Currently unused.
+        **kwargs: Additional keyword arguments forwarded to ``limma::lmFit``.
 
     Returns:
-        LimmaModel:
-            An instance of `LimmaModel` with the `lm_fit` R object set.
+        LimmaModel: Container object with the fitted R ``lmFit`` object, design matrix,
+            and sample/feature names.
+
+    Notes:
+        - If ``"weights"`` assay exists, it is automatically used in the fitting.
+        - The returned ``LimmaModel`` can be used with ``contrasts_fit`` and ``e_bayes``.
+
+    Examples:
+        >>> lm = lm_fit(se, design=design_df, method="robust")
+        >>> lm_ebayes = lm.e_bayes()
     """
     _r = get_r_environment()
     limma_pkg = _limma()

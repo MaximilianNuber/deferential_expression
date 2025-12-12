@@ -19,6 +19,7 @@ _rmana = get_r_environment()
 # Your adapter & converters (assumes you defined these elsewhere in the package)
 # from deferential_expression.edger_RESummarizedExperiment import RMatrixAdapter
 from .resummarizedexperiment import RESummarizedExperiment, RMatrixAdapter, _df_to_r_matrix, _df_to_r_df
+from .r_utils import ensure_r_dependencies
 
 # Helper to lazy-load limma
 _limma_pkg: Any = None
@@ -34,6 +35,7 @@ def _limma() -> Any:
     """
     global _limma_pkg
     if _limma_pkg is None:
+        ensure_r_dependencies()
         _r = _rmana
         _limma_pkg = _r.importr("limma")
     return _limma_pkg
@@ -543,6 +545,75 @@ def contrasts_fit(
         contrast_fit = fit_r
     )
 
+def e_bayes(
+    lm_obj: LimmaModel,
+    proportion: float = 0.01,
+    stdev_coef_lim: Optional[Tuple[float, float]] = None,
+    trend: bool = False,
+    robust: bool = False,
+    winsor_tail_p: Optional[Tuple[float, float]] = None,
+    **kwargs
+) -> LimmaModel:
+    """Compute empirical Bayes moderated statistics for differential expression.
+
+    Wraps the R ``limma::eBayes`` function to compute moderated t-statistics,
+    moderated F-statistics, and log-odds of differential expression by empirical
+    Bayes moderation of standard errors.
+
+    Args:
+        lm_obj: ``LimmaModel`` instance with either ``lm_fit`` or ``contrast_fit`` set.
+        proportion: Assumed proportion of genes that are differentially expressed.
+            Used for computing the B-statistic (log-odds). Default: 0.01.
+        stdev_coef_lim: Optional tuple (lower, upper) specifying limits for standard
+            deviation coefficients. If ``None``, computed automatically.
+        trend: If ``True``, fits a mean-variance trend to the standard deviations.
+            Useful for RNA-seq count data. Default: ``False``.
+        robust: If ``True``, uses robust empirical Bayes to protect against outliers.
+            Default: ``False``.
+        winsor_tail_p: Optional tuple (lower, upper) of tail probabilities for Winsorizing.
+            Only used when ``robust=True``.
+        **kwargs: Additional keyword arguments forwarded to ``limma::eBayes``.
+
+    Returns:
+        LimmaModel: New instance with the ``ebayes`` slot containing the R object
+            returned by ``limma::eBayes``.
+
+    Raises:
+        AssertionError: If neither ``lm_fit`` nor ``contrast_fit`` is set.
+
+    Notes:
+        - Use the fit object from ``contrast_fit`` if available, otherwise ``lm_fit``.
+        - The returned object can be passed to ``top_table()`` or ``decide_tests()``.
+
+    Examples:
+        >>> lm = lm_fit(se, design=design_df)
+        >>> lm_eb = e_bayes(lm, robust=True)
+        >>> results = top_table(lm_eb)
+    """
+    assert isinstance(lm_obj, LimmaModel), "lm_obj must be a LimmaModel instance"
+    
+    r_fit = lm_obj.contrast_fit if lm_obj.contrast_fit is not None else lm_obj.lm_fit
+    assert r_fit is not None, "lm_fit or contrast_fit must be set in the LimmaModel instance"
+
+    _r = _rmana
+    limma_pkg = _limma()
+
+    # Prepare optional arguments
+    call_kwargs: Dict[str, Any] = {"proportion": proportion, "trend": trend, "robust": robust}
+    
+    if stdev_coef_lim is not None:
+        call_kwargs["stdev.coef.lim"] = _r.FloatVector(stdev_coef_lim)
+    
+    if winsor_tail_p is not None:
+        call_kwargs["winsor.tail.p"] = _r.FloatVector(winsor_tail_p)
+    
+    call_kwargs.update(kwargs)
+
+    eb = limma_pkg.eBayes(r_fit, **call_kwargs)
+    
+    return replace(lm_obj, ebayes=eb)
+
+
 def top_table(
     lm_obj: LimmaModel,
     coef: str|int|None = None,
@@ -551,55 +622,305 @@ def top_table(
     sort_by: str = "PValue",
     **kwargs
 ) -> pd.DataFrame:
-    """Extract top results using `limma::topTable` after `eBayes` on a fit.
+    """Extract top results using ``limma::topTable`` from an eBayes fit.
+
+    Wraps the R ``limma::topTable`` function to extract and rank genes by evidence
+    of differential expression. Automatically runs ``eBayes`` if not already computed.
 
     Args:
-        se: A `Limma` instance with either `contrast_fit` or `lm_fit` set.
-        coef: Either the name of the coefficient in the design matrix, or its index. 
-            Indexing starts at 1 (1-based indexing), due to R's conventions.
-        n: Number of top rows to return. If `None`, defaults to the number of rows
-            in the object (i.e., all features).
-        adjust_method: Multiple testing method (e.g., `"BH"`).
-        sort_by: Sorting option passed to `topTable` (e.g., `"PValue"`, `"none"`).
-        **kwargs: Additional keyword arguments forwarded to `topTable`.
+        lm_obj: ``LimmaModel`` instance with ``ebayes``, ``contrast_fit``, or ``lm_fit`` set.
+        coef: Coefficient to extract. Either a coefficient name (string), 1-based index
+            (integer), or ``None`` to use all coefficients. Default: ``None``.
+        n: Number of top genes to return. If ``None``, returns all genes. Default: ``None``.
+        adjust_method: Multiple testing correction method. Options: ``"BH"`` (Benjamini-Hochberg),
+            ``"fdr"``, ``"bonferroni"``, ``"holm"``, ``"none"``. Default: ``"BH"``.
+        sort_by: Column to sort by. Options: ``"PValue"``, ``"logFC"``, ``"AveExpr"``,
+            ``"none"``. Default: ``"PValue"``.
+        **kwargs: Additional keyword arguments forwarded to ``limma::topTable``.
 
     Returns:
-        pandas.DataFrame: A DataFrame of top-ranked features with limma columns
-        converted to `p_value`, `log_fc`, and `adj_p_value`, plus a `gene` index.
+        pd.DataFrame: DataFrame of top-ranked features with standardized column names:
+            ``gene`` (index), ``log_fc``, ``p_value``, ``adj_p_value``, and other limma statistics.
 
     Raises:
-        AssertionError: If neither `contrast_fit` nor `lm_fit` is set.
-    """
-    """
-    Apply topTable.default to the contrast_fit object in a Limma instance.
-    Returns a pandas DataFrame with the top results.
-    """
-    assert isinstance(lm_obj, LimmaModel), "se must be a Limma instance"
-    # assert se.contrast_fit is not None, "contrast_fit must be set in the Limma instance"
+        AssertionError: If no fit object (``ebayes``, ``contrast_fit``, or ``lm_fit``) is set.
 
-    r_fit = lm_obj.contrast_fit if lm_obj.contrast_fit is not None else lm_obj.lm_fit
-    assert r_fit is not None, "lm_fit or contrast_fit must be set in the Limma instance"
+    Notes:
+        - If ``ebayes`` is already computed, uses it directly; otherwise computes it.
+        - Column names are standardized: ``P.Value`` → ``p_value``, ``logFC`` → ``log_fc``,
+          ``adj.P.Val`` → ``adj_p_value``.
+
+    Examples:
+        >>> lm_eb = e_bayes(lm_fit(se, design=design_df))
+        >>> top_genes = top_table(lm_eb, n=10)
+        >>> print(top_genes[['log_fc', 'p_value', 'adj_p_value']])
+    """
+    assert isinstance(lm_obj, LimmaModel), "lm_obj must be a LimmaModel instance"
+
+    # Use ebayes if available, otherwise compute it
+    if lm_obj.ebayes is not None:
+        eb = lm_obj.ebayes
+    else:
+        r_fit = lm_obj.contrast_fit if lm_obj.contrast_fit is not None else lm_obj.lm_fit
+        assert r_fit is not None, "lm_fit or contrast_fit must be set in the LimmaModel instance"
+        _r = _rmana
+        limma_pkg = _limma()
+        eb = limma_pkg.eBayes(r_fit)
 
     _r = _rmana
     limma_pkg = _limma()
 
-    eb = limma_pkg.eBayes(r_fit)
-
     if n is None:
-        
-        n = int(_r.r2py(_r.ro.baseenv["nrow"](r_fit)))
+        n = int(_r.r2py(_r.ro.baseenv["nrow"](eb)))
     
     if coef is None:
-        # default to the first coefficient (1-based index)
         coef = _r.ro.NULL
     
-    # call topTable.default
-    top_r = limma_pkg.topTable(eb,coef = coef, n=n, adjust_method=adjust_method, sort_by="none", **kwargs)
+    # call topTable with correct parameter names
+    top_r = limma_pkg.topTable(
+        eb, 
+        coef=coef, 
+        number=n,  # limma uses 'number', not 'n'
+        adjust_method=adjust_method, 
+        sort_by=sort_by,
+        **kwargs
+    )
     
     # convert to pandas DataFrame
     with _r.localconverter(_r.default_converter + _r.pandas2ri.converter):
         df = _r.get_conversion().rpy2py(top_r)
     
-    return df.reset_index(names="gene").rename(columns={'P.Value':'p_value', 'logFC':'log_fc', 'adj.P.Val':'adj_p_value'})
+    return df.reset_index(names="gene").rename(
+        columns={
+            'P.Value': 'p_value',
+            'logFC': 'log_fc',
+            'adj.P.Val': 'adj_p_value',
+            'AveExpr': 'ave_expr',
+            't': 't_statistic',
+            'B': 'b_statistic'
+        }
+    )
+
+
+def decide_tests(
+    lm_obj: LimmaModel,
+    method: str = "separate",
+    adjust_method: str = "BH",
+    p_value: float = 0.05,
+    lfc: float = 0,
+    **kwargs
+) -> pd.DataFrame:
+    """Classify genes as significantly up, down, or not significant.
+
+    Wraps the R ``limma::decideTests`` function to perform multiple testing across
+    genes and contrasts, returning classification codes for each gene.
+
+    Args:
+        lm_obj: ``LimmaModel`` instance with ``ebayes``, ``contrast_fit``, or ``lm_fit`` set.
+        method: Testing method. Options:
+            - ``"separate"``: Test each contrast separately
+            - ``"global"``: Global F-test across all contrasts
+            - ``"hierarchical"``: Hierarchical testing
+            - ``"nestedF"``: Nested F-tests
+            Default: ``"separate"``.
+        adjust_method: Multiple testing correction method. Options: ``"BH"``, ``"fdr"``,
+            ``"bonferroni"``, ``"holm"``, ``"none"``. Default: ``"BH"``.
+        p_value: Significance threshold for adjusted p-values. Default: 0.05.
+        lfc: Log-fold-change threshold. Genes must have |logFC| > lfc to be considered
+            significant. Default: 0 (no threshold).
+        **kwargs: Additional keyword arguments forwarded to ``limma::decideTests``.
+
+    Returns:
+        pd.DataFrame: DataFrame with genes as rows and contrasts as columns.
+            Values: -1 (down-regulated), 0 (not significant), 1 (up-regulated).
+
+    Raises:
+        AssertionError: If no fit object is set in ``lm_obj``.
+
+    Notes:
+        - If ``ebayes`` is not computed, it will be computed automatically.
+        - The returned matrix is useful for Venn diagrams and summary statistics.
+
+    Examples:
+        >>> lm_eb = e_bayes(lm_fit(se, design=design_df))
+        >>> results = decide_tests(lm_eb, p_value=0.01, lfc=1)
+        >>> print((results != 0).sum())  # Count significant genes per contrast
+    """
+    assert isinstance(lm_obj, LimmaModel), "lm_obj must be a LimmaModel instance"
+
+    # Use ebayes if available, otherwise compute it
+    if lm_obj.ebayes is not None:
+        eb = lm_obj.ebayes
+    else:
+        r_fit = lm_obj.contrast_fit if lm_obj.contrast_fit is not None else lm_obj.lm_fit
+        assert r_fit is not None, "lm_fit or contrast_fit must be set in the LimmaModel instance"
+        _r = _rmana
+        limma_pkg = _limma()
+        eb = limma_pkg.eBayes(r_fit)
+
+    _r = _rmana
+    limma_pkg = _limma()
+
+    # Call decideTests
+    decide_r = limma_pkg.decideTests(
+        eb,
+        method=method,
+        adjust_method=adjust_method,
+        p_value=p_value,
+        lfc=lfc,
+        **kwargs
+    )
+
+    # Convert to pandas DataFrame
+    with _r.localconverter(_r.default_converter + _r.pandas2ri.converter):
+        df = _r.get_conversion().rpy2py(decide_r)
+
+    return df
+
+
+def treat(
+    se: RESummarizedExperiment,
+    design: pd.DataFrame,
+    lfc: float = 1.0,
+    robust: bool = False,
+    trend: bool = False,
+    winsor_tail_p: Optional[Tuple[float, float]] = None,
+    **kwargs
+) -> LimmaModel:
+    """Test for differential expression relative to a fold-change threshold.
+
+    Wraps the R ``limma::treat`` function, which tests whether log-fold-changes are
+    significantly greater than a threshold (in absolute value), rather than simply
+    testing whether they differ from zero.
+
+    Args:
+        se: Input ``RESummarizedExperiment`` containing a ``"log_expr"`` assay and
+            optionally a ``"weights"`` assay.
+        design: Design matrix (samples × covariates) as a pandas DataFrame.
+        lfc: Log-fold-change threshold for testing. Tests |logFC| > lfc.
+            Default: 1.0 (2-fold change).
+        robust: If ``True``, uses robust empirical Bayes. Default: ``False``.
+        trend: If ``True``, fits a mean-variance trend. Default: ``False``.
+        winsor_tail_p: Optional tuple (lower, upper) tail probabilities for Winsorizing
+            when ``robust=True``.
+        **kwargs: Additional keyword arguments forwarded to ``limma::treat``.
+
+    Returns:
+        LimmaModel: Instance with the ``lm_fit`` slot containing the TREAT fit object.
+
+    Notes:
+        - TREAT provides better ranking and p-values when you care about effect size.
+        - The lfc threshold is applied symmetrically (tests |logFC| > lfc).
+        - Use with ``top_table()`` to extract ranked results.
+
+    Examples:
+        >>> lm_treat = treat(se, design=design_df, lfc=1.0)  # Test for >2-fold change
+        >>> results = top_table(lm_treat, n=100)
+    """
+    _r = _rmana
+    limma_pkg = _limma()
+
+    exprs_r = se.assay_r("log_expr")
+    design_r = _df_to_r_matrix(design)
+
+    if "weights" in se.assay_names:
+        weights = se.assay_r("weights")
+    else:
+        weights = _r.ro.NULL
+
+    # Prepare optional arguments
+    call_kwargs: Dict[str, Any] = {"lfc": lfc, "robust": robust, "trend": trend}
+    
+    if winsor_tail_p is not None:
+        call_kwargs["winsor.tail.p"] = _r.FloatVector(winsor_tail_p)
+    
+    call_kwargs.update(kwargs)
+
+    fit = limma_pkg.treat(
+        exprs_r,
+        design_r,
+        weights=weights,
+        **call_kwargs
+    )
+
+    return LimmaModel(
+        sample_names=se.column_names,
+        feature_names=se.row_names,
+        lm_fit=fit,
+        design=design,
+        method="treat"
+    )
+
+
+def duplicate_correlation(
+    se: RESummarizedExperiment,
+    design: pd.DataFrame,
+    block: Union[pd.Series, Sequence, np.ndarray, pd.Categorical],
+    exprs_assay: str = "log_expr",
+    **kwargs
+) -> float:
+    """Estimate correlation between duplicate spots or technical replicates.
+
+    Wraps the R ``limma::duplicateCorrelation`` function to estimate the
+    intra-block correlation for use with ``voom()`` or ``lmFit()``.
+
+    Args:
+        se: Input ``RESummarizedExperiment`` containing an expression assay.
+        design: Design matrix (samples × covariates) as a pandas DataFrame.
+        block: Blocking factor indicating which samples are related (e.g., technical
+            replicates, repeated measures from same individual). Can be array-like
+            or pandas Categorical.
+        exprs_assay: Name of the expression assay to use. Default: ``"log_expr"``.
+        **kwargs: Additional keyword arguments forwarded to ``limma::duplicateCorrelation``.
+
+    Returns:
+        float: Estimated consensus correlation between technical replicates.
+
+    Notes:
+        - Use the returned correlation as the ``block`` parameter in ``voom()``.
+        - For RNA-seq, typically run after an initial ``voom()`` transformation.
+        - The correlation is a consensus value across all genes.
+
+    Examples:
+        >>> # First voom without blocking
+        >>> se_voom = voom(se, design=design_df)
+        >>> # Estimate correlation
+        >>> cor = duplicate_correlation(se_voom, design=design_df, block=batch_labels)
+        >>> # Re-run voom with blocking
+        >>> se_voom2 = voom(se, design=design_df, block=batch_labels)
+    """
+    _r = _rmana
+    limma_pkg = _limma()
+
+    exprs_r = se.assay_r(exprs_assay)
+    design_r = _df_to_r_matrix(design)
+
+    # Convert block to R
+    if isinstance(block, pd.Categorical):
+        with _r.localconverter(_r.default_converter + _r.pandas2ri.converter):
+            block_r = _r.get_conversion().py2rpy(block)
+    else:
+        block_arr = np.asarray(block, dtype=str)
+        block_r = _r.StrVector(block_arr)
+
+    # Get weights if available
+    if "weights" in se.assay_names:
+        weights = se.assay_r("weights")
+    else:
+        weights = _r.ro.NULL
+
+    # Call duplicateCorrelation
+    dupcor_result = limma_pkg.duplicateCorrelation(
+        exprs_r,
+        design_r,
+        block=block_r,
+        weights=weights,
+        **kwargs
+    )
+
+    # Extract consensus correlation
+    consensus_cor = float(_r.r2py(dupcor_result.rx2("consensus.correlation")))
+
+    return consensus_cor
 
 __all__ = [n for n in dir() if not n.startswith("_")]

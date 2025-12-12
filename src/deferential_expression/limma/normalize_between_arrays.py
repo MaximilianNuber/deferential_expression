@@ -9,23 +9,38 @@ from ..edger.utils import numpy_to_r_matrix, pandas_to_r_matrix
 # ——— 3) normalizeBetweenArrays.default ———
 def normalize_between_arrays(
     se: "RESummarizedExperiment",
-    exprs_assay: str = "log_expr",           # which assay to normalize
+    exprs_assay: str = "log_expr",
     normalized_assay: str = "log_expr_norm",
     method: str = "quantile",
     **kwargs
 ) -> "RESummarizedExperiment":
-    """Run `limma::normalizeBetweenArrays` on an expression assay.
+    """Normalize expression values between arrays/samples.
+
+    Wraps the R ``limma::normalizeBetweenArrays`` function to perform between-sample
+    normalization on an expression assay. Common methods include quantile normalization,
+    scaling, and cyclical loess.
 
     Args:
-        se: Input `RESummarizedExperiment` with an R-backed expression assay.
-        exprs_assay: Name of the input expression assay to normalize.
-        normalized_assay: Name for the output normalized assay.
-        method: Normalization method (e.g., `"quantile"`, `"scale"`, etc.).
-        **kwargs: Additional keyword arguments forwarded to `normalizeBetweenArrays`.
+        se: Input ``RESummarizedExperiment`` with an R-backed expression assay.
+        exprs_assay: Name of the input expression assay to normalize. Default: ``"log_expr"``.
+        normalized_assay: Name for the output normalized assay. Default: ``"log_expr_norm"``.
+        method: Normalization method. Options include ``"quantile"``, ``"scale"``,
+            ``"cyclicloess"``, ``"Aquantile"``, ``"Gquantile"``, ``"Rquantile"``,
+            ``"Tquantile"``, or ``"none"``. Default: ``"quantile"``.
+        **kwargs: Additional keyword arguments forwarded to ``limma::normalizeBetweenArrays``.
 
     Returns:
-        RESummarizedExperiment: A new object with the normalized assay stored
-        under `normalized_assay` as an `RMatrixAdapter`.
+        RESummarizedExperiment: New instance with the normalized assay stored under
+            ``normalized_assay`` as an R-backed matrix (``RMatrixAdapter``).
+
+    Notes:
+        - Original object remains unchanged (functional/immutable style).
+        - The input assay must be R-backed and accessible via ``se.assay_r(exprs_assay)``.
+
+    Examples:
+        >>> se_norm = normalize_between_arrays(se, method="quantile")
+        >>> se_norm.assay_names
+        ['log_expr', 'log_expr_norm']
     """
     limma = _limma()
     _r = get_r_environment()

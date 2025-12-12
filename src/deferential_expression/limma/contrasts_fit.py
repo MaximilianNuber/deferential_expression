@@ -15,28 +15,36 @@ def contrasts_fit(
     lm_obj: LimmaModel,
     contrast: Sequence[int | float],
 ) -> LimmaModel:
-    """
-    Apply `limma::contrasts.fit` to an existing `lm_fit` inside a `LimmaModel`.
+    """Apply contrast to fitted linear model.
+
+    Wraps the R ``limma::contrasts.fit`` function to compute coefficients and standard
+    errors for a specified contrast. Returns a new ``LimmaModel`` with the contrast
+    fit stored.
 
     Args:
-        lm_obj:
-            A `LimmaModel` instance with a valid `lm_fit` object.
-        contrast:
-            1D array-like numeric contrast vector
-            (length must equal the number of columns in the design).
-            This can come from `formulaic_contrasts`, a design matrix,
-            or be constructed manually.
+        lm_obj: ``LimmaModel`` instance with a valid ``lm_fit`` object from ``lm_fit()``.
+        contrast: 1D numeric contrast vector (length = number of design columns).
+            Can be constructed manually, from a contrast matrix, or using formulaic
+            contrast syntax. Each element specifies the coefficient for the corresponding
+            design column.
 
     Returns:
-        LimmaModel:
-            A *new* `LimmaModel` in which the `contrast_fit` slot contains the
-            R object returned by `limma::contrasts.fit`.
+        LimmaModel: New instance with the ``contrast_fit`` slot containing the R object
+            returned by ``limma::contrasts.fit``.
 
     Raises:
-        AssertionError:
-            - If `lm_obj` is not a `LimmaModel`.
-            - If `lm_obj.lm_fit` is missing.
-            - If `contrast` is not 1D or not array-like.
+        AssertionError: If ``lm_obj`` is not a ``LimmaModel``, if ``lm_obj.lm_fit``
+            is missing, or if ``contrast`` is not 1D array-like.
+
+    Notes:
+        - Original ``LimmaModel`` remains unchanged (functional/immutable style).
+        - After fitting contrasts, use ``.e_bayes()`` to compute moderated statistics.
+
+    Examples:
+        >>> lm = lm_fit(se, design=design_df)
+        >>> contrast_vec = [0, 1, -1]  # Compare condition 2 vs condition 3
+        >>> lm_contrast = contrasts_fit(lm, contrast=contrast_vec)
+        >>> lm_ebayes = lm_contrast.e_bayes()
     """
     # --- Validation ---------------------------------------------------------
     assert isinstance(lm_obj, LimmaModel), "lm_obj must be a LimmaModel instance"

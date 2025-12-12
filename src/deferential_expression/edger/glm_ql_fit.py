@@ -54,13 +54,13 @@ def glm_ql_fit(
     obj: "RESummarizedExperiment", 
     design: pd.DataFrame, 
     *,
-    dispersion: pd.DataFrame | np.ndarray | None = None, 
-    offset: pd.DataFrame | np.ndarray | None = None,
-    lib_size: Sequence | None = None,
-    weights: int | float | Sequence[float] | pd.DataFrame | np.ndarray | None = None,
+    dispersion: Union[pd.DataFrame, np.ndarray, None] = None, 
+    offset: Union[pd.DataFrame, np.ndarray, None] = None,
+    lib_size: Union[Sequence, None] = None,
+    weights: Union[int, float, Sequence[float], pd.DataFrame, np.ndarray, None] = None,
     legacy: bool = False,
-    top_proportion: 'float' = 0.1,
-    assay: 'str' = 'counts',
+    top_proportion: float = 0.1,
+    assay: str = 'counts',
     **user_kwargs
 ):
     """Functional ``edgeR::glmQLFit`` with optional dispersion/offset/weights.
