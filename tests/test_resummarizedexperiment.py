@@ -125,7 +125,140 @@ def test_set_assay_accepts_existing_rmatrixadapter(simple_re_se):
     assert new.assays["vst"].shape == adapter.shape
 
 
+def test_slicing_with_ranges():
+    """Test slicing with slice objects."""
+    counts = np.array([[1, 2, 3, 4], 
+                       [5, 6, 7, 8],
+                       [9, 10, 11, 12],
+                       [13, 14, 15, 16]], dtype=float)
+    
+    row_names = ["gene1", "gene2", "gene3", "gene4"]
+    col_names = ["sample1", "sample2", "sample3", "sample4"]
+    
+    re_se = RESummarizedExperiment(
+        assays={"counts": counts},
+        row_data=BiocFrame({}, row_names=row_names),
+        column_data=BiocFrame({}, row_names=col_names),
+        row_names=row_names,
+        column_names=col_names,
+    )
+    
+    # Slice rows
+    sliced = re_se[0:2, :]
+    assert sliced.shape == (2, 4)
+    assert list(sliced.row_names) == ["gene1", "gene2"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[1, 2, 3, 4], [5, 6, 7, 8]])
+    )
+    
+    # Slice columns
+    sliced = re_se[:, 1:3]
+    assert sliced.shape == (4, 2)
+    assert list(sliced.column_names) == ["sample2", "sample3"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[2, 3], [6, 7], [10, 11], [14, 15]])
+    )
+
+
+def test_slicing_with_single_integer():
+    """Test slicing with single integer index (should preserve 2D structure)."""
+    counts = np.array([[1, 2, 3, 4], 
+                       [5, 6, 7, 8],
+                       [9, 10, 11, 12],
+                       [13, 14, 15, 16]], dtype=float)
+    
+    row_names = ["gene1", "gene2", "gene3", "gene4"]
+    col_names = ["sample1", "sample2", "sample3", "sample4"]
+    
+    re_se = RESummarizedExperiment(
+        assays={"counts": counts},
+        row_data=BiocFrame({}, row_names=row_names),
+        column_data=BiocFrame({}, row_names=col_names),
+        row_names=row_names,
+        column_names=col_names,
+    )
+    
+    # Single row
+    sliced = re_se[1, :]
+    assert sliced.shape == (1, 4)
+    assert list(sliced.row_names) == ["gene2"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[5, 6, 7, 8]])
+    )
+    
+    # Single column
+    sliced = re_se[:, 2]
+    assert sliced.shape == (4, 1)
+    assert list(sliced.column_names) == ["sample3"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[3], [7], [11], [15]])
+    )
+
+
+def test_slicing_with_boolean_mask():
+    """Test slicing with boolean mask."""
+    counts = np.array([[1, 2, 3, 4], 
+                       [5, 6, 7, 8],
+                       [9, 10, 11, 12],
+                       [13, 14, 15, 16]], dtype=float)
+    
+    row_names = ["gene1", "gene2", "gene3", "gene4"]
+    col_names = ["sample1", "sample2", "sample3", "sample4"]
+    
+    re_se = RESummarizedExperiment(
+        assays={"counts": counts},
+        row_data=BiocFrame({}, row_names=row_names),
+        column_data=BiocFrame({}, row_names=col_names),
+        row_names=row_names,
+        column_names=col_names,
+    )
+    
+    # Boolean mask for rows
+    mask = np.array([True, False, True, False])
+    sliced = re_se[mask, :]
+    assert sliced.shape == (2, 4)
+    assert list(sliced.row_names) == ["gene1", "gene3"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[1, 2, 3, 4], [9, 10, 11, 12]])
+    )
+
+
+def test_slicing_with_integer_array():
+    """Test slicing with integer array."""
+    counts = np.array([[1, 2, 3, 4], 
+                       [5, 6, 7, 8],
+                       [9, 10, 11, 12],
+                       [13, 14, 15, 16]], dtype=float)
+    
+    row_names = ["gene1", "gene2", "gene3", "gene4"]
+    col_names = ["sample1", "sample2", "sample3", "sample4"]
+    
+    re_se = RESummarizedExperiment(
+        assays={"counts": counts},
+        row_data=BiocFrame({}, row_names=row_names),
+        column_data=BiocFrame({}, row_names=col_names),
+        row_names=row_names,
+        column_names=col_names,
+    )
+    
+    # Integer array for rows
+    idx = np.array([0, 2, 3])
+    sliced = re_se[idx, :]
+    assert sliced.shape == (3, 4)
+    assert list(sliced.row_names) == ["gene1", "gene3", "gene4"]
+    np.testing.assert_array_equal(
+        sliced.assay("counts", as_numpy=True),
+        np.array([[1, 2, 3, 4], [9, 10, 11, 12], [13, 14, 15, 16]])
+    )
+
+
 __author__ = "MaximilianNuber"
 __copyright__ = "MaximilianNuber"
 __license__ = "MIT"
+
 

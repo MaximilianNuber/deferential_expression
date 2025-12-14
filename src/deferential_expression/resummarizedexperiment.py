@@ -120,7 +120,8 @@ def _slice_rmat(adapter: "RMatrixAdapter", rows, cols):
     ridx = _to_r_index(rows, nrow, r=r)
     cidx = _to_r_index(cols, ncol, r=r)
     bracket = r.ro.baseenv["["]
-    out = bracket(rm, ridx, cidx)
+    # CRITICAL: use drop=FALSE to preserve matrix structure when subsetting single rows/cols
+    out = bracket(rm, ridx, cidx, drop=False)
     return RMatrixAdapter(out, r)
 
 class RMatrixAdapter:
@@ -494,19 +495,52 @@ class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
             if isinstance(v, RMatrixAdapter):
                 new_assays[k] = _slice_rmat(v, rows, cols)
             else:
-                new_assays[k] = v[rows, cols]
+                # For non-RMatrixAdapter assays (numpy arrays, etc), we need to handle
+                # single-integer indexing carefully to preserve 2D structure
+                sliced = v[rows, cols]
+                # If slicing resulted in 1D array, reshape to keep 2D
+                if hasattr(sliced, 'ndim') and sliced.ndim == 1:
+                    # Determine which dimension was collapsed
+                    # Check if rows is a single int
+                    if isinstance(rows, int):
+                        sliced = sliced.reshape(1, -1)
+                    # Check if cols is a single int
+                    elif isinstance(cols, int):
+                        sliced = sliced.reshape(-1, 1)
+                new_assays[k] = sliced
 
-        # Slice row/column data
-        rd = None if self.row_data is None else self.row_data_df.iloc[rows]
-        cd = None if self.column_data is None else self.column_data_df.iloc[cols]
+        # Slice row/column data - ensure we always get DataFrames, not Series
+        rd = None
+        if self.row_data is not None:
+            rd_sliced = self.row_data_df.iloc[rows]
+            # If slicing with single int returns Series, convert back to DataFrame
+            if isinstance(rd_sliced, pd.Series):
+                rd = pd.DataFrame([rd_sliced])
+            else:
+                rd = rd_sliced
+        
+        cd = None
+        if self.column_data is not None:
+            cd_sliced = self.column_data_df.iloc[cols]
+            # If slicing with single int returns Series, convert back to DataFrame
+            if isinstance(cd_sliced, pd.Series):
+                cd = pd.DataFrame([cd_sliced])
+            else:
+                cd = cd_sliced
 
         # Slice names
         row_names = None
         col_names = None
         if self.row_names is not None:
             row_names = np.array(self.row_names)[rows].tolist()
+            # Ensure list for single-element case
+            if not isinstance(row_names, list):
+                row_names = [row_names]
         if self.column_names is not None:
             col_names = np.array(self.column_names)[cols].tolist()
+            # Ensure list for single-element case
+            if not isinstance(col_names, list):
+                col_names = [col_names]
 
         return self.__class__(
             assays=new_assays,

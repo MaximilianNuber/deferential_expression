@@ -10,3 +10,18 @@ dependencies:
   - bioconductor-edger
   - bioconductor-limma
   - pip
+  - pip:
+      - scanpy
+      - anndata
+      - numpy
+      - pandas
+      - matplotlib
+      - seaborn
+      - jupyterlab
+      - singlecellexperiment
+      - summarizedexperiment
+      - biocutils
+      - plotnine
+      - scikit-learn
+      - statsmodels
+      - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@master"
