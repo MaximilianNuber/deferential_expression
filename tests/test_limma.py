@@ -31,7 +31,7 @@ from deferential_expression.limma import (
 )
 
 # For R conversion verification
-from pyrtools.lazy_r_env import get_r_environment
+from bioc2ri.lazy_r_env import get_r_environment
 
 @pytest.fixture
 def r_env():

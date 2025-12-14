@@ -25,7 +25,7 @@ from deferential_expression.edger import (
 from summarizedexperiment import SummarizedExperiment
 
 # For R conversion verification
-from pyrtools.lazy_r_env import get_r_environment
+from bioc2ri.lazy_r_env import get_r_environment
 
 
 @pytest.fixture
