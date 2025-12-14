@@ -126,6 +126,7 @@ class LimmaModel:
 def lm_fit(
     se: RESummarizedExperiment,
     design: pd.DataFrame,
+    assay: str = "log_expr",
     ndups: Optional[int] = None,
     method: Literal["ls", "robust"] = "ls",
     return_result_object: bool = False,
@@ -168,7 +169,7 @@ def lm_fit(
         feature_names=se.row_names,
     )
 
-    exprs_r = se.assay_r("log_expr")
+    exprs_r = se.assay_r(assay)
     design_r = pandas_to_r_matrix(design)
     lmres.design = design
 
