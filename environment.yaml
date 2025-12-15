@@ -25,3 +25,4 @@ dependencies:
       - scikit-learn
       - statsmodels
       - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@master"
+      - "deferential_expression @ git+https://github.com/MaximilianNuber/deferential_expression.git@main"

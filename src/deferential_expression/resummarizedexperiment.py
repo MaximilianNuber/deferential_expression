@@ -550,6 +550,28 @@ class RESummarizedExperiment(SummarizedExperiment): # type: ignore[misc]
             column_names=col_names,
             metadata=dict(self.metadata)
         )
+
+    def propagate_dimnames_to_assays(self) -> RESummarizedExperiment:
+        """The current row names and column names of the RESummarizedExperiment are set for each R-matrix in assays."""
+        
+        row_names = self.get_row_names()
+        col_names = self.get_column_names()
+
+        assays = self._assays()
+        assay_names = list(assays.keys())
+
+        new_assays = {}
+        for assay in assay_names:
+            mat = assays[assay].rmat
+            new_mat = set_colnames(mat, colnames)
+            new_mat = set_rownames(new_mat, row_names)
+
+            new_assays[assay] = new_mat
+        
+        out = self.copy()
+        out._assays = new_assays
+
+        return out
     
     def to_summarized_experiment(self) -> SummarizedExperiment:
         """Convert to a base ``SummarizedExperiment``, converting R matrices to NumPy.

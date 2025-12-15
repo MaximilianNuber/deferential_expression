@@ -141,6 +141,7 @@ def lm_fit(
         se: Input ``RESummarizedExperiment`` containing a ``"log_expr"`` assay
             (by convention) and optionally a ``"weights"`` assay for precision weights.
         design: Design matrix (samples × covariates) as a pandas DataFrame.
+        assay: The assay in the RESummarizedExperiment to use.
         ndups: Number of technical replicates per unique sample. If ``None``, assumes
             no technical replication.
         method: Fitting method. Options: ``"ls"`` (least squares) or ``"robust"``
