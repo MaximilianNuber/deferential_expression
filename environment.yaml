@@ -1,0 +1,28 @@
+name: deferential_expression_acc
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.8
+  - r-base>=4.0
+  - rpy2
+  - bioconductor-edger
+  - bioconductor-limma
+  - bioconductor-sva
+  - pip
+  - pip:
+      - scanpy
+      - anndata
+      - numpy
+      - pandas
+      - matplotlib
+      - seaborn
+      - jupyterlab
+      - singlecellexperiment
+      - summarizedexperiment
+      - biocutils
+      - plotnine
+      - scikit-learn
+      - statsmodels
+      - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@master"
+      # Install this package locally with: pip install -e .
