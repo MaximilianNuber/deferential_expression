@@ -11,11 +11,11 @@ import pandas as pd
 from typing import Any
 
 # Import from the installed package  
-from deferential_expression_acc.resummarizedexperiment import RESummarizedExperiment
+from deferential_expression.resummarizedexperiment import RESummarizedExperiment
 from summarizedexperiment import SummarizedExperiment
 
 # Import limma functions
-from deferential_expression_acc.limma import (
+from deferential_expression.limma import (
     voom,
     voom_with_quality_weights,
     normalize_between_arrays,
@@ -121,7 +121,7 @@ class TestRConversion:
     
     def test_design_to_r_conversion(self, mock_design, r_env):
         """Test that design matrix converts to R properly."""
-        from deferential_expression_acc.resummarizedexperiment import _df_to_r_matrix
+        from deferential_expression.resummarizedexperiment import _df_to_r_matrix
         
         design_r = _df_to_r_matrix(mock_design)
         

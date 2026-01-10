@@ -1,6 +1,6 @@
 # Installation Guide
 
-`deferential_expression_acc` relies on R and specific Bioconductor packages (`edgeR`, `limma`, `sva`). You can install these dependencies automatically using Conda (recommended) or manually using a system-installed R.
+`deferential_expression` relies on R and specific Bioconductor packages (`edgeR`, `limma`, `sva`). You can install these dependencies automatically using Conda (recommended) or manually using a system-installed R.
 
 ## Method 1: Conda (Recommended)
 
@@ -11,7 +11,7 @@ The easiest way to install all dependencies, including R and the required R pack
 
     ```bash
     conda env create -f environment.yaml
-    conda activate deferential_expression_acc
+    conda activate deferential_expression
     ```
 
 3.  Install the package in editable mode:
@@ -47,7 +47,7 @@ If you prefer to use your system's R installation, follow these steps.
 1.  Install the package via pip:
 
     ```bash
-    pip install "deferential_expression_acc @ git+https://github.com/MaximilianNuber/deferential_expression_acc.git@main"
+    pip install "deferential_expression @ git+https://github.com/MaximilianNuber/deferential_expression.git@main"
     ```
 
 2.  **Automatic R Package Installation**:
