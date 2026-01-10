@@ -1,4 +1,4 @@
-name: deferential_expression_acc
+name: deferential_expression
 channels:
   - conda-forge
   - bioconda

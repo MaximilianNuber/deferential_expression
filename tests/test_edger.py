@@ -11,8 +11,8 @@ import pandas as pd
 from typing import Any
 
 # Import from the installed package  
-from deferential_expression_acc.resummarizedexperiment import RESummarizedExperiment
-from deferential_expression_acc.edger import (
+from deferential_expression.resummarizedexperiment import RESummarizedExperiment
+from deferential_expression.edger import (
     calc_norm_factors,
     cpm,
     filter_by_expr,
@@ -120,7 +120,7 @@ class TestRConversion:
     
     def test_design_to_r_conversion(self, mock_design):
         """Test converting design matrix to R format."""
-        from deferential_expression_acc.edger.utils import pandas_to_r_matrix
+        from deferential_expression.edger.utils import pandas_to_r_matrix
         design_r = pandas_to_r_matrix(mock_design)
         assert design_r is not None
 

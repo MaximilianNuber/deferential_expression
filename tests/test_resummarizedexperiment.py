@@ -10,7 +10,7 @@ from biocframe import BiocFrame
 from summarizedexperiment import SummarizedExperiment
 
 # ⬇️ adjust this import to your actual module path
-from deferential_expression_acc.resummarizedexperiment import RESummarizedExperiment, RMatrixAdapter
+from deferential_expression.resummarizedexperiment import RESummarizedExperiment, RMatrixAdapter
 from numpy.typing import NDArray
 
 import warnings

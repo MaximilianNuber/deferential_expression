@@ -1,4 +1,4 @@
-# deferential_expression_acc
+# deferential_expression
 
 Python-first access to battle-tested R/Bioconductor differential expression tooling (edgeR, limma, sva) — without giving up modern Python data workflows.
 
