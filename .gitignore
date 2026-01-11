@@ -52,3 +52,7 @@ MANIFEST
 .venv*/
 .conda*/
 .python-version
+
+# Jupyter junk
+.ipynb_checkpoints/
+Untitled*.ipynb
