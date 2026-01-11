@@ -37,10 +37,10 @@ jobs:
             libssl-dev \
             libxml2-dev
 
-      - name: Install R packages (edgeR, limma)
+      - name: Install R packages (edgeR, limma, sva)
         run: |
           Rscript -e 'if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager", repos = "https://cloud.r-project.org")'
-          Rscript -e 'BiocManager::install(c("edgeR", "limma"), ask = FALSE, update = FALSE)'
+          Rscript -e 'BiocManager::install(c("edgeR", "limma", "sva"), ask = FALSE, update = FALSE)'
 
       - name: Install Python dependencies
         run: |
@@ -51,8 +51,9 @@ jobs:
 
           # test deps
           pip install pytest pytest-cov rpy2 biocframe summarizedexperiment pandas numpy h5py
+          pip install genomicranges iranges singlecellexperiment
           pip install "git+https://github.com/MaximilianNuber/bioc2ri.git"
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=deferential_expression --cov-report=term-missing
+          pytest --cov=deferential_expression --cov-report=term-missing -W ignore::DeprecationWarning
