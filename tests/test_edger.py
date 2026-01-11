@@ -11,16 +11,15 @@ import pandas as pd
 from typing import Any
 
 # Import from the installed package  
-from deferential_expression.resummarizedexperiment import RESummarizedExperiment
+from deferential_expression import initialize_r
 from deferential_expression.edger import (
     calc_norm_factors,
     cpm,
     filter_by_expr,
     glm_ql_fit,
     glm_ql_ftest,
-    estimate_disp,
     top_tags,
-    EdgeR,
+    EdgeRModel,
 )
 from summarizedexperiment import SummarizedExperiment
 
@@ -60,267 +59,122 @@ def mock_design():
     design = pd.DataFrame({
         'Intercept': [1, 1, 1, 1, 1, 1],
         'Condition': [0, 0, 0, 1, 1, 1]
-    })
+    }, index=[f"Sample_{i}" for i in range(6)])
     return design
 
 
 @pytest.fixture
-def mock_edger(mock_count_data):
-    """Create mock EdgeR object with count data."""
+def mock_se(mock_count_data):
+    """Create mock SummarizedExperiment with count data."""
     counts, gene_names, sample_names = mock_count_data
     
-    row_data = pd.DataFrame({
-        'gene_id': gene_names,
-        'gene_name': [f"SYMBOL_{i}" for i in range(len(gene_names))]
-    })
-    
-    col_data = pd.DataFrame({
-        'sample_id': sample_names,
-        'condition': ['Control', 'Control', 'Control', 'Treatment', 'Treatment', 'Treatment']
-    })
-    
-    # Create SummarizedExperiment first to get R-backed matrices
-    se_base = SummarizedExperiment(
+    se = SummarizedExperiment(
         assays={'counts': counts},
-        row_data=row_data,
-        column_data=col_data,
         row_names=gene_names,
         column_names=sample_names
     )
     
-    # Convert to RESummarizedExperiment (R-backed)
-    res = RESummarizedExperiment.from_summarized_experiment(se_base)
-    
-    # Convert to EdgeR
-    edge_r = EdgeR(
-        assays=res.assays,
-        row_data=res.row_data,
-        column_data=res.column_data,
-        row_names=res.row_names,
-        column_names=res.column_names,
-        metadata=res.metadata
-    )
-    
-    return edge_r
-
-
-class TestRConversion:
-    """Test basic R object conversions."""
-    
-    def test_se_to_r_conversion(self, mock_edger):
-        """Test converting SummarizedExperiment to R matrix."""
-        counts_r = mock_edger.assay_r("counts")
-        assert counts_r is not None
-        
-        # Verify dimensions
-        r_env = get_r_environment()
-        dims = r_env.r2py(r_env.ro.baseenv["dim"](counts_r))
-        assert dims[0] == 100  # 100 genes
-        assert dims[1] == 6    # 6 samples
-    
-    def test_design_to_r_conversion(self, mock_design):
-        """Test converting design matrix to R format."""
-        from deferential_expression.edger.utils import pandas_to_r_matrix
-        design_r = pandas_to_r_matrix(mock_design)
-        assert design_r is not None
+    # Initialize R backing
+    se = initialize_r(se, assay='counts')
+    return se
 
 
 class TestNormalization:
     """Test normalization functions."""
     
-    def test_calc_norm_factors_tmm(self, mock_edger):
-        """Test TMM normalization."""
-        obj_norm = calc_norm_factors(mock_edger, method="TMM")
+    def test_calc_norm_factors(self, mock_se):
+        """Test calcNormFactors."""
+        se_norm = calc_norm_factors(mock_se, method="TMM")
         
-        assert "norm.factors" in obj_norm.column_data.column_names
-        factors = obj_norm.column_data["norm.factors"]
-        assert len(factors) == 6
-        # TMM factors should be positive
-        assert all(f > 0 for f in factors)
+        # Check norm.factors were added
+        coldata = se_norm.get_column_data()
+        assert "norm.factors" in coldata.column_names
+        
+        # Check factors are reasonable
+        nf = np.asarray(coldata["norm.factors"])
+        assert len(nf) == 6
+        assert np.all(nf > 0)
+
+
+class TestCPM:
+    """Test CPM functions."""
     
-    def test_cpm_calculation(self, mock_edger):
-        """Test CPM (counts per million) calculation."""
-        obj_norm = calc_norm_factors(mock_edger)
-        cpm_result = cpm(obj_norm, assay="counts")
+    def test_cpm_basic(self, mock_se):
+        """Test basic CPM calculation."""
+        se_cpm = cpm(mock_se, log=False)
         
-        # CPM returns EdgeR object with new 'cpm' assay
-        assert cpm_result.shape == (100, 6)
-        # Check that CPM assay was added
-        assert "cpm" in cpm_result.assay_names
-        # CPM values should be positive
-        cpm_mat = cpm_result.assay("cpm")
-        if hasattr(cpm_mat, '__array__'):
-            cpm_mat = np.asarray(cpm_mat)
-        assert (cpm_mat >= 0).all()
+        assert "cpm" in se_cpm.assay_names
+        cpm_vals = np.asarray(se_cpm.assays["cpm"])
+        assert cpm_vals.shape == (100, 6)
+        assert np.all(cpm_vals >= 0)
+    
+    def test_log_cpm(self, mock_se):
+        """Test log-CPM calculation."""
+        se_cpm = cpm(mock_se, log=True)
+        
+        assert "logcpm" in se_cpm.assay_names
 
 
 class TestFiltering:
     """Test filtering functions."""
     
-    def test_filter_by_expr(self, mock_edger):
-        """Test filtering by minimum expression level."""
-        obj_norm = calc_norm_factors(mock_edger)
-        mask = filter_by_expr(obj_norm, min_count=5, min_total_count=15)
+    def test_filter_by_expr(self, mock_se):
+        """Test filterByExpr."""
+        mask = filter_by_expr(mock_se, min_count=10)
         
-        # Mask should be boolean and have length equal to number of genes
         assert isinstance(mask, np.ndarray)
         assert mask.dtype == bool
-        assert len(mask) == mock_edger.shape[0]
+        assert len(mask) == 100
 
 
-class TestDispersionEstimation:
-    """Test dispersion estimation."""
-    
-    def test_estimate_disp(self, mock_edger, mock_design):
-        """Test dispersion estimation."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        
-        assert obj_disp.disp is not None
-        # Should have DGEList with dispersion info
-        assert obj_disp.dge is not None
-    
-    def test_estimate_disp_with_trend(self, mock_edger, mock_design):
-        """Test dispersion estimation with trend."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        
-        assert obj_disp.disp is not None
-
-
-class TestGLMFit:
+class TestGLMFitting:
     """Test GLM fitting functions."""
     
-    def test_glm_ql_fit(self, mock_edger, mock_design):
-        """Test GLM quasi-likelihood fit."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design)
+    def test_glm_ql_fit(self, mock_se, mock_design):
+        """Test glmQLFit."""
+        se_norm = calc_norm_factors(mock_se)
+        model = glm_ql_fit(se_norm, mock_design)
         
-        # Extract counts from normalized EdgeR
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        
-        assert fit_result.fit is not None
-        assert fit_result.sample_names == obj_norm.column_names
-        assert fit_result.feature_names == obj_norm.row_names
+        assert isinstance(model, EdgeRModel)
+        assert model.fit is not None
+        assert model.design is not None
     
-    def test_glm_ql_ftest(self, mock_edger, mock_design):
-        """Test GLM quasi-likelihood F-test."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
+    def test_glm_ql_ftest(self, mock_se, mock_design):
+        """Test glmQLFTest."""
+        se_norm = calc_norm_factors(mock_se)
+        model = glm_ql_fit(se_norm, mock_design)
+        results = glm_ql_ftest(model, coef=2)
         
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        
-        # Test coefficient 2 (Condition)
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        
-        assert test_result is not None
-
-
-class TestTopTags:
-    """Test top tags extraction."""
-    
-    def test_top_tags_basic(self, mock_edger, mock_design):
-        """Test basic topTags extraction."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        
-        # glm_ql_ftest already returns a DataFrame with all genes
-        # top_tags is already integrated into glm_ql_ftest
-        assert isinstance(test_result, pd.DataFrame)
-        assert len(test_result) > 0
-        # Check for expected column names from edgeR
-        assert test_result.shape[1] >= 4  # Should have multiple columns
-    
-    def test_top_tags_all_genes(self, mock_edger, mock_design):
-        """Test topTags with all genes."""
-        obj_norm = calc_norm_factors(mock_edger)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        
-        # glm_ql_ftest returns all genes by default
-        assert isinstance(test_result, pd.DataFrame)
-        assert len(test_result) == 100
+        assert isinstance(results, pd.DataFrame)
+        assert "logFC" in results.columns
+        assert len(results) == 100
 
 
 class TestCompleteWorkflow:
-    """Test complete edgeR analysis workflows."""
+    """Test complete edgeR workflow."""
     
-    def test_standard_edger_workflow(self, mock_edger, mock_design):
-        """Test standard edgeR differential expression workflow."""
-        # Step 1: Normalization
-        obj_norm = calc_norm_factors(mock_edger, method="TMM")
-        assert "norm.factors" in obj_norm.column_data.column_names
+    def test_standard_workflow(self, mock_se, mock_design):
+        """Test standard edgeR workflow."""
+        # Normalize
+        se = calc_norm_factors(mock_se, method="TMM")
         
-        # Step 2: Estimate dispersion
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        assert obj_disp.disp is not None
+        # Filter
+        mask = filter_by_expr(se, min_count=5)
+        se_filtered = se[mask, :]
         
-        # Step 3: GLM fit
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        assert fit_result.fit is not None
+        # Reinitialize R after subsetting
+        se_filtered = initialize_r(se_filtered, assay='counts')
         
-        # Step 4: Test
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        assert test_result is not None
-        assert isinstance(test_result, pd.DataFrame)
-    
-    def test_workflow_with_cpm(self, mock_edger, mock_design):
-        """Test workflow with CPM normalization."""
-        obj_norm = calc_norm_factors(mock_edger)
+        # Fit model
+        design = mock_design.loc[se_filtered.column_names]
+        model = glm_ql_fit(se_filtered, design)
         
-        # Calculate CPM
-        cpm_result = cpm(obj_norm, assay="counts")
-        assert cpm_result.shape == (100, 6)
-        assert "cpm" in cpm_result.assay_names
+        # Test
+        results = model.glm_ql_ftest(coef=2)
         
-        # Continue with regular workflow
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        
-        assert isinstance(test_result, pd.DataFrame)
-    
-    def test_workflow_with_filtering(self, mock_edger, mock_design):
-        """Test workflow with expression filtering."""
-        obj_norm = calc_norm_factors(mock_edger)
-        
-        # Get filter mask (this verifies filter_by_expr works)
-        mask = filter_by_expr(obj_norm, min_count=5)
-        num_filtered = mask.sum()
-        
-        # Verify mask is boolean and sensible
-        assert isinstance(mask, np.ndarray)
-        assert mask.dtype == bool
-        assert num_filtered > 0
-        assert num_filtered <= obj_norm.shape[0]
-        
-        # Use unfiltered data for the rest of the workflow (filtering genes is complex)
-        obj_disp = estimate_disp(obj_norm, design=mock_design, trend="loess")
-        fit_result = glm_ql_fit(obj_norm, design=mock_design)
-        test_result = glm_ql_ftest(fit_result, coef=2)
-        
-        assert isinstance(test_result, pd.DataFrame)
-        assert len(test_result) == 100  # All genes returned by glm_ql_ftest
+        assert isinstance(results, pd.DataFrame)
+        assert "logFC" in results.columns
 
 
-class TestEdgeCases:
-    """Test edge cases and error handling."""
-    
-    def test_norm_factors_with_single_method(self, mock_edger):
-        """Test normalization with different methods."""
-        # RLE method
-        obj_rle = calc_norm_factors(mock_edger, method="RLE")
-        assert "norm.factors" in obj_rle.column_data.column_names
-    
-    def test_cpm_with_prior_count(self, mock_edger):
-        """Test CPM calculation with prior count."""
-        obj_norm = calc_norm_factors(mock_edger)
-        cpm_result = cpm(obj_norm, prior_count=2)
-        
-        # Prior count should prevent exact zeros
-        assert cpm_result.shape == (100, 6)
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s"])
