@@ -5,6 +5,6 @@ API Reference
    :toctree: _autosummary
    :recursive:
 
-   deferential_expression_acc.limma
-   deferential_expression_acc.edger
-   deferential_expression_acc.sva
+   deferential_expression.limma
+   deferential_expression.edger
+   deferential_expression.sva

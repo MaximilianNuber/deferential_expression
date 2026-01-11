@@ -1,0 +1,47 @@
+# Minimal environment for use with system R installation
+# This environment does NOT install R or R packages via conda.
+# You must have R installed on your system and install R packages separately.
+#
+# IMPORTANT: Requires system build tools (gcc, make) to be installed for rpy2.
+# On Ubuntu/Debian: sudo apt install build-essential
+#
+# Usage:
+#   conda env create -f system_r_env.yaml
+#   conda activate dea_system_r
+#   pip install -e .
+#
+# Then install R dependencies with:
+#   python -c "from deferential_expression import install_base_dependencies; install_base_dependencies()"
+#   python -c "from deferential_expression import ensure_r_dependencies; ensure_r_dependencies(['edgeR', 'limma', 'sva'])"
+
+name: dea_system_r
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12
+  - pip
+  # Core scientific stack
+  - numpy
+  - pandas
+  - scipy
+  # Jupyter
+  - jupyterlab
+  # required for rpy2 to link with system R, can alternatively be installed via system package manager
+  - conda-forge::libtirpc
+  # DO NOT include conda compilers - use system compiler for rpy2 to link with system R
+  - pip:
+      # Single-cell and bioinformatics
+      - scanpy
+      - anndata
+      - summarizedexperiment
+      - biocutils
+      - singlecellexperiment
+      # R interface - installed via pip to use system R from PATH
+      # Requires: system R, system gcc/build-essential
+      # - rpy2
+      - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@master"
+      # Visualization
+      - matplotlib
+      - seaborn
+      - plotnine
+      # Install this package locally with: pip install -e .
