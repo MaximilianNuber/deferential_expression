@@ -39,7 +39,7 @@ dependencies:
       # R interface - installed via pip to use system R from PATH
       # Requires: system R, system gcc/build-essential
       # - rpy2
-      - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@master"
+      - "bioc2ri @ git+https://github.com/MaximilianNuber/bioc2ri.git@main"
       # Visualization
       - matplotlib
       - seaborn

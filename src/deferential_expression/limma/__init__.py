@@ -21,6 +21,7 @@ ensure_r_dependencies(["limma"])
 
 # Functional API exports
 from .voom import voom
+from .voom_with_quality_weights import voom_with_quality_weights
 from .normalize_between_arrays import normalize_between_arrays
 from .remove_batch_effect import remove_batch_effect
 from .lm_fit import lm_fit, LimmaModel
